@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Matrix Code Rain</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <canvas id="rain"></canvas>
+
+  <button id="rabbitBtn" class="rabbit-btn" aria-label="Open code rain settings" title="Code Rain Settings">
+    <svg viewBox="0 0 64 64" aria-hidden="true">
+      <path d="M16 41c0-9 7-16 16-16s16 7 16 16-7 15-16 15-16-6-16-15z"/>
+      <path d="M24 24c-5-7-6-14-2-17 4-3 9 3 11 11"/>
+      <path d="M39 24c1-9 6-14 10-12 4 2 3 10-2 18"/>
+      <circle cx="40" cy="37" r="2.4"/>
+      <path d="M30 43c3 2 7 2 10 0"/>
+    </svg>
+  </button>
+
+  <div id="settingsModal" class="modal" aria-hidden="true" role="dialog" aria-labelledby="settingsTitle">
+    <div class="modal-card">
+      <h2 id="settingsTitle">Code Rain Settings</h2>
+      <label>Rain color
+        <input type="color" id="colorInput" value="#4dff4d" />
+      </label>
+      <label>Speed (chars/sec)
+        <input type="range" id="speedInput" min="6" max="60" step="1" value="24" />
+        <span id="speedValue">24</span>
+      </label>
+      <label>Tail length
+        <input type="range" id="tailInput" min="4" max="50" step="1" value="18" />
+        <span id="tailValue">18</span>
+      </label>
+      <label>Characters (one continuous string)
+        <textarea id="charsInput" rows="5"></textarea>
+      </label>
+      <div class="actions">
+        <button id="resetBtn" type="button">Reset to Matrix set</button>
+        <button id="closeBtn" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
