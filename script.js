@@ -1,135 +1,101 @@
-const canvas = document.getElementById('rain');
-const ctx = canvas.getContext('2d');
+// ==UserScript==
+// @name         like looking in a mirror
+// @namespace    tornscripts
+// @version      1.0.0
+// @description  Duplicates your profile picture + honor bar panel onto Torn Home for quick mirror vibes.
+// @match        https://www.torn.com/*
+// @grant        none
+// @run-at       document-idle
+// ==/UserScript==
 
-const MATRIX_BASE = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
-const MATRIX_HALF_KATAKANA = (() => {
-  let s = '';
-  for (let cp = 0xff66; cp <= 0xff9f; cp += 1) s += String.fromCodePoint(cp);
-  return s;
-})();
+(function () {
+  'use strict';
 
-const toSuperscript = (str) => str.normalize('NFKD').split('').map((c) => {
-  if (c >= '0' && c <= '9') return String.fromCodePoint(0x2070 + (c === '1' ? 0 : Number(c)));
-  const map = { a: 'ᵃ', b: 'ᵇ', c: 'ᶜ', d: 'ᵈ', e: 'ᵉ', f: 'ᶠ', g: 'ᵍ', h: 'ʰ', i: 'ⁱ', j: 'ʲ', k: 'ᵏ', l: 'ˡ', m: 'ᵐ', n: 'ⁿ', o: 'ᵒ', p: 'ᵖ', r: 'ʳ', s: 'ˢ', t: 'ᵗ', u: 'ᵘ', v: 'ᵛ', w: 'ʷ', x: 'ˣ', y: 'ʸ', z: 'ᶻ' };
-  return map[c.toLowerCase()] || c;
-}).join('');
+  const HOME_PATHS = new Set(['/index.php']);
+  const PROFILE_URL = '/profiles.php?XID=me';
+  const CONTAINER_ID = 'mirror-profile-panel';
 
-const toSubscript = (str) => str.split('').map((c) => {
-  const m = {0:'₀',1:'₁',2:'₂',3:'₃',4:'₄',5:'₅',6:'₆',7:'₇',8:'₈',9:'₉',a:'ₐ',e:'ₑ',h:'ₕ',i:'ᵢ',j:'ⱼ',k:'ₖ',l:'ₗ',m:'ₘ',n:'ₙ',o:'ₒ',p:'ₚ',r:'ᵣ',s:'ₛ',t:'ₜ',u:'ᵤ',v:'ᵥ',x:'ₓ'};
-  return m[c.toLowerCase()] || c;
-}).join('');
+  if (!HOME_PATHS.has(location.pathname)) return;
 
-const defaultChars = MATRIX_BASE + MATRIX_HALF_KATAKANA + toSuperscript(MATRIX_BASE) + toSubscript(MATRIX_BASE);
-
-const state = {
-  color: '#4dff4d',
-  speed: 24,
-  tail: 18,
-  chars: defaultChars,
-  drops: [],
-  glyphSize: 17,
-};
-
-function resize() {
-  const dpr = devicePixelRatio || 1;
-  canvas.width = innerWidth * dpr;
-  canvas.height = innerHeight * dpr;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  state.drops = Array.from({ length: Math.ceil(innerWidth / 12) * 2 }, () => newDrop());
-}
-
-function newDrop() {
-  return {
-    x: Math.random() * innerWidth,
-    y: Math.random() * -innerHeight,
-    size: 12 + Math.random() * 12,
-    speed: (state.speed * 0.4) + Math.random() * state.speed,
-    length: Math.max(3, Math.round((state.tail * 0.6) + Math.random() * state.tail)),
-  };
-}
-
-function randomChar() {
-  const i = Math.floor(Math.random() * state.chars.length);
-  return state.chars[i] || '0';
-}
-
-let last = performance.now();
-function draw(now) {
-  const dt = Math.min(0.05, (now - last) / 1000);
-  last = now;
-  ctx.fillStyle = 'rgba(2,4,2,0.2)';
-  ctx.fillRect(0, 0, innerWidth, innerHeight);
-
-  state.drops.forEach((d) => {
-    d.y += d.speed * dt * 18;
-    for (let i = 0; i < d.length; i += 1) {
-      const y = d.y - i * d.size;
-      if (y < -d.size || y > innerHeight + d.size) continue;
-      const alpha = 1 - i / d.length;
-      ctx.fillStyle = i === 0 ? `rgba(220,255,220,${alpha})` : hexToRgba(state.color, alpha);
-      ctx.font = `${d.size}px monospace`;
-      ctx.fillText(randomChar(), d.x + (Math.random() - 0.5) * 3, y);
+  const style = document.createElement('style');
+  style.textContent = `
+    #${CONTAINER_ID} {
+      margin: 12px 0;
+      border: 1px solid #2c2c2c;
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--default-bg-panel-color, #111);
     }
-    if (d.y - d.length * d.size > innerHeight + 20) Object.assign(d, newDrop(), { y: -20 });
-  });
+    #${CONTAINER_ID} .mirror-title {
+      padding: 8px 12px;
+      font-weight: 700;
+      border-bottom: 1px solid #2c2c2c;
+      background: rgba(255,255,255,0.03);
+    }
+    #${CONTAINER_ID} .mirror-body {
+      padding: 8px;
+    }
+    #${CONTAINER_ID} .mirror-error {
+      padding: 10px 12px;
+      color: #ff8686;
+      font-size: 12px;
+    }
+  `;
+  document.head.appendChild(style);
 
-  requestAnimationFrame(draw);
-}
+  const mount = document.createElement('section');
+  mount.id = CONTAINER_ID;
+  mount.innerHTML = '<div class="mirror-title">Like Looking in a Mirror</div><div class="mirror-body">Loading your profile mirror…</div>';
 
-function hexToRgba(hex, a) {
-  const x = hex.replace('#', '');
-  const n = Number.parseInt(x.length === 3 ? x.split('').map((c) => c + c).join('') : x, 16);
-  return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
-}
+  const homeMain = document.querySelector('#mainContainer .content-wrapper, #mainContainer, #mainContainer > div');
+  if (!homeMain) return;
+  homeMain.prepend(mount);
 
-const rabbitBtn = document.getElementById('rabbitBtn');
-const modal = document.getElementById('settingsModal');
-const colorInput = document.getElementById('colorInput');
-const speedInput = document.getElementById('speedInput');
-const tailInput = document.getElementById('tailInput');
-const charsInput = document.getElementById('charsInput');
-const speedValue = document.getElementById('speedValue');
-const tailValue = document.getElementById('tailValue');
+  const bodyEl = mount.querySelector('.mirror-body');
 
-function syncInputs() {
-  colorInput.value = state.color;
-  speedInput.value = state.speed;
-  tailInput.value = state.tail;
-  charsInput.value = state.chars;
-  speedValue.textContent = state.speed;
-  tailValue.textContent = state.tail;
-}
+  fetch(PROFILE_URL, { credentials: 'include' })
+    .then((res) => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.text();
+    })
+    .then((html) => {
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const selectors = [
+        '.user-profile .profile-image-wrapper',
+        '.profile-wrapper .profileImage',
+        '.profile-top .profileImage',
+        '.user-profile .honorWrap',
+        '.profile-container .honorWrap',
+        '.profileImage, .honorWrap'
+      ];
 
-rabbitBtn.addEventListener('click', () => {
-  modal.classList.add('open');
-  modal.setAttribute('aria-hidden', 'false');
-});
-document.getElementById('closeBtn').addEventListener('click', () => {
-  modal.classList.remove('open');
-  modal.setAttribute('aria-hidden', 'true');
-});
-document.getElementById('resetBtn').addEventListener('click', () => {
-  state.chars = defaultChars;
-  syncInputs();
-});
-modal.addEventListener('click', (e) => {
-  if (e.target === modal) document.getElementById('closeBtn').click();
-});
+      let block = null;
+      for (const sel of selectors) {
+        const found = doc.querySelector(sel);
+        if (found) {
+          block = found.closest('.profile-wrapper, .user-profile, .profile-top, .content-wrapper') || found;
+          break;
+        }
+      }
 
-colorInput.addEventListener('input', () => { state.color = colorInput.value; });
-speedInput.addEventListener('input', () => { state.speed = Number(speedInput.value); speedValue.textContent = state.speed; });
-tailInput.addEventListener('input', () => { state.tail = Number(tailInput.value); tailValue.textContent = state.tail; });
-charsInput.addEventListener('input', () => { state.chars = charsInput.value || defaultChars; });
+      if (!block) {
+        bodyEl.innerHTML = '<div class="mirror-error">Could not find profile pic + honor bar block on your profile page.</div>';
+        return;
+      }
 
-window.addEventListener('mousemove', (e) => {
-  const r = rabbitBtn.getBoundingClientRect();
-  const cx = r.left + r.width / 2;
-  const cy = r.top + r.height / 2;
-  const d = Math.hypot(e.clientX - cx, e.clientY - cy);
-  rabbitBtn.style.opacity = String(Math.min(1, Math.max(0.18, 1 - d / 700)));
-});
+      const clone = document.createElement('div');
+      clone.innerHTML = block.outerHTML;
 
-window.addEventListener('resize', resize);
-resize();
-syncInputs();
-requestAnimationFrame(draw);
+      clone.querySelectorAll('script').forEach((s) => s.remove());
+      clone.querySelectorAll('a').forEach((a) => {
+        const href = a.getAttribute('href');
+        if (href && href.startsWith('/')) a.href = `https://www.torn.com${href}`;
+      });
+
+      bodyEl.innerHTML = '';
+      bodyEl.append(...clone.childNodes);
+    })
+    .catch((err) => {
+      bodyEl.innerHTML = `<div class="mirror-error">Mirror failed to load: ${err.message}</div>`;
+    });
+})();
