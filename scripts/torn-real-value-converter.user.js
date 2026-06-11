@@ -1,25 +1,24 @@
 // ==UserScript==
 // @name         Torn Real Value Converter v5
 // @namespace    http://tampermonkey.net/
-// @version      5.4.0
+// @version      5.4.1
 // @description  Converts all Torn cash values to real USD using the classic $5/23.5M rate. Replaces $amount with converted value everywhere. Unconverted torn values show §.
 // @author       Lazuli for Shaul
 // @match        https://www.torn.com/*
 // @grant        GM_addStyle
-// @run-at       document-idle
+// @run-at       document-start
 // ==/UserScript==
 
 /*
-    Torn Real Value Converter v5.4.0
+    Torn Real Value Converter v5.4.1
     ----------------------------------
     classic rate: $5 USD per 23.5M Torn Money
-    that's $0.0000002128 per Torn $
 
     what it does:
     - finds every $amount on the page
     - replaces it with the converted USD value
     - any torn value that can't be converted gets § instead of $
-    - runs continuously to catch Torn's dynamic content
+    - runs from document-start to catch all dynamic content
 
     no APIs, no keys, no settings. just math.
 */
@@ -27,10 +26,9 @@
 (function () {
     'use strict';
 
-    // the classic rate
     var RATE = 5 / 23500000;
+    var SYMBOL = '\u00a7'; // section sign for unconverted torn money
 
-    // format a number nicely
     function fmt(val) {
         if (val == null || isNaN(val)) return '—';
         var a = Math.abs(val);
@@ -41,7 +39,6 @@
         return '$' + val.toFixed(4);
     }
 
-    // parse "$5,000,000" or "$5.2M" into a number
     function parseMoney(text) {
         var s = text.replace(/[$,]/g, '');
         var mult = 1;
@@ -52,7 +49,6 @@
         return isNaN(n) ? null : n * mult;
     }
 
-    // check if an element is inside our own UI
     function isOurs(el) {
         var cur = el;
         while (cur) {
@@ -63,18 +59,20 @@
         return false;
     }
 
-    // process a single text node: replace $amount with converted value
-    function processNode(node) {
-        if (!node || node.nodeType !== 3) return;
+    // process a text node: replace $amount with converted value
+    function processTextNode(node) {
+        if (!node || node.nodeType !== 3) return false;
         var text = node.textContent;
-        if (text.indexOf('$') === -1) return;
-        if (!/\$\d/.test(text)) return;
+        if (text.indexOf('$') === -1) return false;
+        if (!/\$\d/.test(text)) return false;
 
         var p = node.parentElement;
-        if (!p) return;
-        if (isOurs(p)) return;
+        if (!p) return false;
+        if (isOurs(p)) return false;
 
-        // match $ followed by digits, optional commas/decimals, optional K/M/B
+        // don't process if already inside a converted span
+        if (p.tagName === 'SPAN' && p.className === 'tt-val') return false;
+
         var regex = /\$([\d,]+(?:\.\d+)?[KMBkmb]?)/g;
         var match, lastIdx = 0;
         var frag = document.createDocumentFragment();
@@ -82,25 +80,19 @@
 
         while ((match = regex.exec(text)) !== null) {
             found = true;
-
-            // text before the match
             if (match.index > lastIdx) {
                 frag.appendChild(document.createTextNode(text.slice(lastIdx, match.index)));
             }
-
             var tornAmt = parseMoney('$' + match[1]);
             if (tornAmt !== null) {
-                // convert and replace
                 var usd = tornAmt * RATE;
                 var span = document.createElement('span');
                 span.className = 'tt-val';
                 span.textContent = fmt(usd);
                 frag.appendChild(span);
             } else {
-                // couldn't parse, keep as-is
                 frag.appendChild(document.createTextNode('$' + match[1]));
             }
-
             lastIdx = regex.lastIndex;
         }
 
@@ -110,84 +102,93 @@
             }
             node.parentNode.replaceChild(frag, node);
         }
+
+        return found;
     }
 
-    // walk the whole DOM and process all text nodes
+    // replace bare $ with § (torn money indicator)
+    function replaceBareDollar(node) {
+        if (!node || node.nodeType !== 3) return;
+        var text = node.textContent;
+        // standalone $ or $ not followed by a digit
+        if (text.indexOf('$') === -1) return;
+        if (/\$\d/.test(text)) return; // has actual amounts, skip
+
+        var p = node.parentElement;
+        if (!p || isOurs(p)) return;
+
+        node.textContent = text.replace(/\$/g, SYMBOL);
+    }
+
+    // sweep the whole DOM
     function sweep() {
         var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+        var nodes = [];
         var tn;
         while ((tn = walker.nextNode())) {
-            processNode(tn);
+            nodes.push(tn);
+        }
+        // process in reverse to avoid index issues when replacing nodes
+        for (var i = nodes.length - 1; i >= 0; i--) {
+            processTextNode(nodes[i]);
+        }
+        // second pass for bare dollars
+        walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+        nodes = [];
+        while ((tn = walker.nextNode())) {
+            nodes.push(tn);
+        }
+        for (var j = nodes.length - 1; j >= 0; j--) {
+            replaceBareDollar(nodes[j]);
         }
     }
 
-    // also replace standalone $ signs (not followed by digits) with §
-    // this handles cases like "Cash: $" where the amount is in a separate node
-    function replaceBareSymbols() {
-        var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
-        var tn;
-        while ((tn = walker.nextNode())) {
-            if (tn.textContent === '$' || tn.textContent === ' $') {
-                var p = tn.parentElement;
-                if (p && !isOurs(p)) {
-                    tn.textContent = tn.textContent.replace('$', '\u00a7');
-                }
-            }
-        }
-    }
-
-    // mutation observer for dynamic content
+    // mutation observer
     var _obs = null;
-    var _debounce = null;
+    var _timer = null;
+
+    function onMutations() {
+        clearTimeout(_timer);
+        _timer = setTimeout(sweep, 50);
+    }
 
     function startObserver() {
         if (_obs) return;
-        _obs = new MutationObserver(function (muts) {
-            var nodes = [];
-            for (var i = 0; i < muts.length; i++) {
-                for (var j = 0; j < muts[i].addedNodes.length; j++) {
-                    var nd = muts[i].addedNodes[j];
-                    if (nd.nodeType === 3) {
-                        if (nd.textContent.indexOf('$') !== -1) nodes.push(nd);
-                    } else if (nd.nodeType === 1 && !isOurs(nd)) {
-                        var w = document.createTreeWalker(nd, NodeFilter.SHOW_TEXT, null);
-                        var t;
-                        while ((t = w.nextNode())) {
-                            if (t.textContent.indexOf('$') !== -1) nodes.push(t);
-                        }
-                    }
-                }
-            }
-            if (nodes.length === 0) return;
-            clearTimeout(_debounce);
-            _debounce = setTimeout(function () {
-                for (var n = 0; n < nodes.length; n++) {
-                    if (nodes[n].parentNode) processNode(nodes[n]);
-                }
-                replaceBareSymbols();
-            }, 100);
+        _obs = new MutationObserver(onMutations);
+        _obs.observe(document.documentElement || document.body, {
+            childList: true,
+            subtree: true,
+            characterData: true
         });
-        _obs.observe(document.body, { childList: true, subtree: true });
     }
 
-    // init
+    // init — runs at document-start
     function init() {
-        // initial sweep
-        sweep();
-        replaceBareSymbols();
+        // wait for body to exist
+        if (!document.body) {
+            setTimeout(init, 10);
+            return;
+        }
 
-        // start observer
+        sweep();
         startObserver();
 
-        // periodic sweep every 2 seconds to catch anything missed
-        setInterval(function () {
+        // aggressive periodic sweep for first 60 seconds
+        var count = 0;
+        var fastInterval = setInterval(function () {
             sweep();
-            replaceBareSymbols();
-        }, 2000);
+            count++;
+            if (count >= 20) {
+                clearInterval(fastInterval);
+                // then every 3 seconds forever
+                setInterval(sweep, 3000);
+            }
+        }, 3000);
 
-        console.log('[TRV] Torn Real Value Converter v5.4.0 loaded — $5/23.5M rate');
+        console.log('[TRV] v5.4.1 loaded — $5/23.5M rate');
     }
 
+    // kick off
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
     } else {
