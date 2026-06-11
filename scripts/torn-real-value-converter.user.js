@@ -1,33 +1,19 @@
 // ==UserScript==
 // @name         Torn Real Value Converter v5
 // @namespace    http://tampermonkey.net/
-// @version      5.4.1
-// @description  Converts all Torn cash values to real USD using the classic $5/23.5M rate. Replaces $amount with converted value everywhere. Unconverted torn values show §.
+// @version      5.4.5
+// @description  Converts all Torn cash values to real USD using $5/23.5M rate.
 // @author       Lazuli for Shaul
 // @match        https://www.torn.com/*
 // @grant        GM_addStyle
 // @run-at       document-start
 // ==/UserScript==
 
-/*
-    Torn Real Value Converter v5.4.1
-    ----------------------------------
-    classic rate: $5 USD per 23.5M Torn Money
-
-    what it does:
-    - finds every $amount on the page
-    - replaces it with the converted USD value
-    - any torn value that can't be converted gets § instead of $
-    - runs from document-start to catch all dynamic content
-
-    no APIs, no keys, no settings. just math.
-*/
-
 (function () {
     'use strict';
 
     var RATE = 5 / 23500000;
-    var SYMBOL = '\u00a7'; // section sign for unconverted torn money
+    var _totalConverted = 0;
 
     function fmt(val) {
         if (val == null || isNaN(val)) return '—';
@@ -59,18 +45,15 @@
         return false;
     }
 
-    // process a text node: replace $amount with converted value
-    function processTextNode(node) {
+    // process a text node
+    function processNode(node) {
         if (!node || node.nodeType !== 3) return false;
         var text = node.textContent;
         if (text.indexOf('$') === -1) return false;
         if (!/\$\d/.test(text)) return false;
 
         var p = node.parentElement;
-        if (!p) return false;
-        if (isOurs(p)) return false;
-
-        // don't process if already inside a converted span
+        if (!p || isOurs(p)) return false;
         if (p.tagName === 'SPAN' && p.className === 'tt-val') return false;
 
         var regex = /\$([\d,]+(?:\.\d+)?[KMBkmb]?)/g;
@@ -85,11 +68,11 @@
             }
             var tornAmt = parseMoney('$' + match[1]);
             if (tornAmt !== null) {
-                var usd = tornAmt * RATE;
                 var span = document.createElement('span');
                 span.className = 'tt-val';
-                span.textContent = fmt(usd);
+                span.textContent = fmt(tornAmt * RATE);
                 frag.appendChild(span);
+                _totalConverted++;
             } else {
                 frag.appendChild(document.createTextNode('$' + match[1]));
             }
@@ -102,93 +85,51 @@
             }
             node.parentNode.replaceChild(frag, node);
         }
-
         return found;
-    }
-
-    // replace bare $ with § (torn money indicator)
-    function replaceBareDollar(node) {
-        if (!node || node.nodeType !== 3) return;
-        var text = node.textContent;
-        // standalone $ or $ not followed by a digit
-        if (text.indexOf('$') === -1) return;
-        if (/\$\d/.test(text)) return; // has actual amounts, skip
-
-        var p = node.parentElement;
-        if (!p || isOurs(p)) return;
-
-        node.textContent = text.replace(/\$/g, SYMBOL);
     }
 
     // sweep the whole DOM
     function sweep() {
+        if (!document.body) return;
         var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
         var nodes = [];
         var tn;
-        while ((tn = walker.nextNode())) {
-            nodes.push(tn);
-        }
-        // process in reverse to avoid index issues when replacing nodes
-        for (var i = nodes.length - 1; i >= 0; i--) {
-            processTextNode(nodes[i]);
-        }
-        // second pass for bare dollars
-        walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
-        nodes = [];
-        while ((tn = walker.nextNode())) {
-            nodes.push(tn);
-        }
-        for (var j = nodes.length - 1; j >= 0; j--) {
-            replaceBareDollar(nodes[j]);
-        }
+        while ((tn = walker.nextNode())) nodes.push(tn);
+        for (var i = nodes.length - 1; i >= 0; i--) processNode(nodes[i]);
     }
 
     // mutation observer
     var _obs = null;
     var _timer = null;
-
-    function onMutations() {
-        clearTimeout(_timer);
-        _timer = setTimeout(sweep, 50);
-    }
-
+    function onMutations() { clearTimeout(_timer); _timer = setTimeout(sweep, 50); }
     function startObserver() {
         if (_obs) return;
         _obs = new MutationObserver(onMutations);
-        _obs.observe(document.documentElement || document.body, {
-            childList: true,
-            subtree: true,
-            characterData: true
-        });
+        _obs.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
     }
 
-    // init — runs at document-start
-    function init() {
-        // wait for body to exist
-        if (!document.body) {
-            setTimeout(init, 10);
-            return;
-        }
+    // floating counter to show script is working
+    function showCounter() {
+        var div = document.createElement('div');
+        div.id = 'tt-counter';
+        div.style.cssText = 'position:fixed;bottom:5px;left:5px;z-index:999999;background:#1a1a1a;color:#4dff4d;font:11px monospace;padding:3px 8px;border:1px solid #333;border-radius:3px;opacity:0.7;pointer-events:none;';
+        document.body.appendChild(div);
+        setInterval(function () {
+            if (document.getElementById('tt-counter')) {
+                document.getElementById('tt-counter').textContent = 'TRV: ' + _totalConverted + ' converted';
+            }
+        }, 1000);
+    }
 
+    function init() {
+        if (!document.body) { setTimeout(init, 10); return; }
         sweep();
         startObserver();
-
-        // aggressive periodic sweep for first 60 seconds
-        var count = 0;
-        var fastInterval = setInterval(function () {
-            sweep();
-            count++;
-            if (count >= 20) {
-                clearInterval(fastInterval);
-                // then every 3 seconds forever
-                setInterval(sweep, 3000);
-            }
-        }, 3000);
-
-        console.log('[TRV] v5.4.1 loaded — $5/23.5M rate');
+        setInterval(sweep, 2000);
+        showCounter();
+        console.log('[TRV] v5.4.5 loaded — $5/23.5M rate');
     }
 
-    // kick off
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
     } else {
