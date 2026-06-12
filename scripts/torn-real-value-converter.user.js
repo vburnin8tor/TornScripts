@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn USD Converter
 // @author       shaul [3908280]
-// @version      1.3
+// @version      1.2
 // @description  Convert Torn cash displays to USD equivalents
 // @match        https://www.torn.com/*
 // @grant        none
@@ -29,6 +29,21 @@
         }
 
         return '$' + usd.toFixed(4);
+    }
+
+    function formatTorn(tornAmount) {
+        if (tornAmount >= 1e9) {
+            return '§' + (tornAmount / 1e9).toFixed(2) + 'B';
+        }
+        if (tornAmount >= 1e6) {
+            return '§' + (tornAmount / 1e6).toFixed(2) + 'M';
+        }
+        if (tornAmount >= 1e3) {
+            return '§' + tornAmount.toLocaleString(undefined, {
+                maximumFractionDigits: 0
+            });
+        }
+        return '§' + tornAmount.toLocaleString();
     }
 
     function convertText(text) {
@@ -59,7 +74,7 @@
                         break;
                 }
 
-                return formatUSD(amount) + ' ';
+                return formatUSD(amount) + ' (' + formatTorn(amount) + ') ';
             }
         );
     }
@@ -70,11 +85,6 @@
             !node.nodeValue ||
             !node.nodeValue.includes('$')
         ) {
-            return;
-        }
-
-        // skip if already converted
-        if (node.nodeValue.includes('USD') || node.nodeValue.match(/\$\d+\.\d{2,}/)) {
             return;
         }
 
@@ -117,11 +127,5 @@
         childList: true,
         subtree: true
     });
-
-    // periodic re-scan to catch anything the observer missed
-    // (torn re-renders elements and can overwrite converted values)
-    setInterval(function() {
-        scan(document.body);
-    }, 2000);
 
 })();
