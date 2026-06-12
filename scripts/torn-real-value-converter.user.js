@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn USD Converter
 // @author       shaul [3908280]
-// @version      1.2
+// @version      1.3
 // @description  Convert Torn cash displays to USD equivalents
 // @match        https://www.torn.com/*
 // @grant        none
@@ -59,11 +59,6 @@
                         break;
                 }
 
-                // Skip suspiciously tiny values
-                if (amount < 1000) {
-                    return match;
-                }
-
                 return formatUSD(amount) + ' ';
             }
         );
@@ -75,6 +70,11 @@
             !node.nodeValue ||
             !node.nodeValue.includes('$')
         ) {
+            return;
+        }
+
+        // skip if already converted
+        if (node.nodeValue.includes('USD') || node.nodeValue.match(/\$\d+\.\d{2,}/)) {
             return;
         }
 
@@ -117,5 +117,11 @@
         childList: true,
         subtree: true
     });
+
+    // periodic re-scan to catch anything the observer missed
+    // (torn re-renders elements and can overwrite converted values)
+    setInterval(function() {
+        scan(document.body);
+    }, 2000);
 
 })();
