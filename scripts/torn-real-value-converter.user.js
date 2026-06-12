@@ -1,20 +1,35 @@
 // ==UserScript==
 // @name         Torn Real Value Converter v5
 // @namespace    http://tampermonkey.net/
-// @version      5.4.8
-// @description  Converts all Torn cash values to real USD using $5/23.5M rate.
+// @version      5.5.0
+// @description  Converts all Torn cash to real USD. Classic $5/23.5M rate. Simple.
 // @author       Lazuli for Shaul
 // @match        https://www.torn.com/*
 // @grant        none
-// @run-at       document-start
+// @run-at       document-idle
 // ==/UserScript==
+
+/*
+    Torn Real Value Converter v5.5.0
+    ----------------------------------
+    classic rate: $5 USD per 23.5M Torn Money
+
+    strategy:
+    - wait for document-idle (everything loaded)
+    - walk every text node in the body
+    - if it contains $ followed by a number, convert it
+    - done. no observers, no polling, no frameworks.
+
+    to revert: set custom rate to 1.0
+*/
 
 (function () {
     'use strict';
 
+    // classic $5 per 23.5M
     var RATE = 5 / 23500000;
-    var CONVERTED = 0;
 
+    // format a USD number for display
     function fmt(val) {
         if (val == null || isNaN(val)) return '?';
         var a = Math.abs(val);
@@ -25,6 +40,7 @@
         return '$' + val.toFixed(4);
     }
 
+    // parse "$1,071,199" or "$5.2M" into a number
     function parse(s) {
         s = s.replace(/[$,]/g, '');
         var m = 1;
@@ -35,139 +51,93 @@
         return isNaN(n) ? null : n * m;
     }
 
-    // convert money in a specific element
-    function convertElement(el) {
-        if (!el) return false;
-        if (el.getAttribute('data-tt-done')) return false;
-        var text = el.textContent;
+    // collect all text nodes under a root, deepest first
+    function collectTextNodes(root) {
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+        var nodes = [];
+        while (walker.nextNode()) {
+            nodes.push(walker.currentNode);
+        }
+        return nodes;
+    }
+
+    // convert $amount in a text node to its USD equivalent
+    function convertTextNode(node) {
+        if (!node || node.nodeType !== 3) return false;
+        var text = node.textContent;
         if (!text || !/\$\d/.test(text)) return false;
 
+        // skip script/style content
+        var parent = node.parentElement;
+        if (!parent) return false;
+        if (parent.tagName === 'SCRIPT' || parent.tagName === 'STYLE') return false;
+
         var regex = /\$([\d,]+(?:\.\d+)?[KMB]?)/g;
-        var newHtml = text.replace(regex, function(match, amountStr) {
-            var amount = parse(match);
-            if (amount !== null) {
-                CONVERTED++;
-                return fmt(amount * RATE);
-            }
-            return match;
-        });
+        var match, lastIdx = 0;
+        var frag = document.createDocumentFragment();
+        var found = false;
 
-        if (newHtml !== text) {
-            el.innerHTML = newHtml;
-            el.setAttribute('data-tt-done', '1');
-            return true;
+        while ((match = regex.exec(text)) !== null) {
+            found = true;
+
+            // text before the dollar amount
+            if (match.index > lastIdx) {
+                frag.appendChild(document.createTextNode(text.slice(lastIdx, match.index)));
+            }
+
+            // convert the dollar amount
+            var tornAmt = parse(match[0]);
+            if (tornAmt !== null) {
+                frag.appendChild(document.createTextNode(fmt(tornAmt * RATE)));
+            } else {
+                frag.appendChild(document.createTextNode(match[0]));
+            }
+
+            lastIdx = regex.lastIndex;
         }
-        return false;
+
+        if (found) {
+            // any remaining text after the last match
+            if (lastIdx < text.length) {
+                frag.appendChild(document.createTextNode(text.slice(lastIdx)));
+            }
+            if (node.parentNode) {
+                node.parentNode.replaceChild(frag, node);
+            }
+        }
+
+        return found;
     }
 
-    // walk text nodes and convert
-    function sweepNodes() {
-        if (!document.body) return;
-        var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
-        var toProcess = [];
-        while (walker.nextNode()) {
-            var node = walker.currentNode;
-            if (node.textContent && /\$\d/.test(node.textContent)) {
-                var parent = node.parentElement;
-                if (parent && !parent.getAttribute('data-tt-done') &&
-                    parent.tagName !== 'SCRIPT' && parent.tagName !== 'STYLE') {
-                    toProcess.push({node: node, parent: parent});
+    // single pass: walk all text nodes, convert any $amount found
+    function convertAll() {
+        var nodes = collectTextNodes(document.body);
+        // process deepest nodes first so parent indices stay valid
+        for (var i = nodes.length - 1; i >= 0; i--) {
+            try {
+                if (nodes[i].parentNode) {
+                    convertTextNode(nodes[i]);
                 }
-            }
-        }
-        // process in reverse
-        for (var i = toProcess.length - 1; i >= 0; i--) {
-            var item = toProcess[i];
-            if (item.node.parentNode) {
-                var span = document.createElement('span');
-                var text = item.node.textContent;
-                var regex = /\$([\d,]+(?:\.\d+)?[KMB]?)/g;
-                var newHtml = text.replace(regex, function(match, amountStr) {
-                    var amount = parse(match);
-                    if (amount !== null) {
-                        CONVERTED++;
-                        return '<span style="color:inherit">' + fmt(amount * RATE) + '</span>';
-                    }
-                    return match;
-                });
-                span.innerHTML = newHtml;
-                item.node.parentNode.replaceChild(span, item.node);
-                item.parent.setAttribute('data-tt-done', '1');
+            } catch (e) {
+                // skip nodes that cause errors
             }
         }
     }
 
-    // also target known torn money elements by selector
-    function sweepSelectors() {
-        if (!document.body) return;
-        var selectors = [
-            '#user-money',
-            '.swiss-faction-money-value',
-            '.money-positive',
-            '.money-negative',
-            '[data-money]',
-            '.profit',
-            '.bank-investment-money-cell-total',
-            '.bank-investment-money-cell-per-day'
-        ];
-        for (var s = 0; s < selectors.length; s++) {
-            var els = document.querySelectorAll(selectors[s]);
-            for (var e = 0; e < els.length; e++) {
-                convertElement(els[e]);
-            }
-        }
-    }
-
-    // watch for changes
-    var obs = null;
-    var timer = null;
-    function onChange() {
-        clearTimeout(timer);
-        timer = setTimeout(function() {
-            sweepNodes();
-            sweepSelectors();
-        }, 100);
-    }
-    function startObs() {
-        if (obs) return;
-        obs = new MutationObserver(onChange);
-        obs.observe(document.documentElement, {
-            childList: true,
-            subtree: true,
-            characterData: true
-        });
-    }
-
+    // run at document-idle when everything is loaded
     function init() {
-        if (!document.body) { setTimeout(init, 50); return; }
-
-        // initial conversion
-        sweepNodes();
-        sweepSelectors();
-
-        // start observer
-        startObs();
-
-        // periodic sweep
-        setInterval(function() {
-            sweepNodes();
-            sweepSelectors();
-        }, 1000);
-
-        // counter display
-        var counter = document.createElement('div');
-        counter.style.cssText = 'position:fixed;bottom:3px;left:3px;z-index:999999;font:10px monospace;color:#0f0;background:rgba(0,0,0,0.8);padding:2px 6px;border-radius:2px;pointer-events:none;';
-        document.body.appendChild(counter);
-        setInterval(function() {
-            if (counter.parentNode) counter.textContent = 'TRV ' + CONVERTED;
-        }, 500);
-
-        console.log('[TRV] v5.4.8 loaded — $5/23.5M rate');
+        convertAll();
+        console.log('[TRV] v5.5.0 — converted all $amount values at document-idle');
     }
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
+    // document-idle is handled by @run-at, but also check readyState
+    if (document.readyState === 'complete') {
         init();
+    } else {
+       document.addEventListener('readystatechange', function () {
+            if (document.readyState === 'complete') {
+                init();
+            }
+        });
     }
 })();
