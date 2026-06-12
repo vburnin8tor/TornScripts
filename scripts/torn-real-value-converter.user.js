@@ -32,18 +32,15 @@
     }
 
     function formatTorn(tornAmount) {
-        if (tornAmount >= 1e9) {
+        if (tornAmount >= 1e10) {
             return '§' + (tornAmount / 1e9).toFixed(2) + 'B';
         }
-        if (tornAmount >= 1e6) {
+        if (tornAmount >= 1e7) {
             return '§' + (tornAmount / 1e6).toFixed(2) + 'M';
         }
-        if (tornAmount >= 1e3) {
-            return '§' + tornAmount.toLocaleString(undefined, {
-                maximumFractionDigits: 0
-            });
-        }
-        return '§' + tornAmount.toLocaleString();
+        return '§' + tornAmount.toLocaleString(undefined, {
+            maximumFractionDigits: 0
+        });
     }
 
     function convertText(text) {
