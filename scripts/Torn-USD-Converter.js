@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn USD Converter
 // @author       shaul [3908280]
-// @version      1.4
+// @version      1.5
 // @description  Convert Torn cash displays to USD equivalents
 // @match        https://www.torn.com/*
 // @grant        none
@@ -13,9 +13,8 @@
     const SHOW_ORIGINAL_VALUE = true;
     const USD_PER_TORN = 5 / 23500000;
 
-
     function formatUSD(tornAmount) {
-        const usd = tornAmount * USD_PER_TORN;
+        var usd = tornAmount * USD_PER_TORN;
 
         if (usd <= 0.00001){
             return '$' + usd.toFixed(6)
@@ -50,24 +49,28 @@
 
     function convertText(text) {
         return text.replace(
-            /\$([\d,.]+)\s*([kMBT])?/gi,
-            (match, value, suffix) => {
+            /\$([\d,.]+)\s*([kMBT]|mil|bil)?/gi,
+            function(match, value, suffix) {
 
-                let amount = parseFloat(
+                var amount = parseFloat(
                     value.replace(/,/g, '')
                 );
 
-                switch ((suffix || '')) {
+                if (isNaN(amount)) return match;
+
+                switch ((suffix || '').toLowerCase()) {
                     case 'k':
                         amount *= 1e3;
                         break;
-                    case 'M':
+                    case 'm':
+                    case 'mil':
                         amount *= 1e6;
                         break;
-                    case 'B':
+                    case 'b':
+                    case 'bil':
                         amount *= 1e9;
                         break;
-                    case 'T':
+                    case 't':
                         amount *= 1e12;
                         break;
                 }
@@ -77,52 +80,70 @@
         );
     }
 
+    function isAlreadyConverted(text) {
+        if (!text) return false;
+        if (text.indexOf('(§') !== -1) return true;
+        return false;
+    }
+
     function processElement(el) {
         if (!el || el.dataset.usdConverted === "1") return;
 
-        const text = el.textContent;
-        if (!text || !text.includes('$')) return;
+        var text = el.textContent;
+        if (!text || text.indexOf('$') === -1) return;
+        if (isAlreadyConverted(text)) return;
 
         el.textContent = convertText(text);
         el.dataset.usdConverted = "1";
     }
 
     function processNode(node) {
-    if (
-        node.nodeType !== Node.TEXT_NODE ||
-        !node.nodeValue ||
-        node.nodeValue.includes('(§')
-    ) {
-        return;
-    }
+        if (
+            node.nodeType !== Node.TEXT_NODE ||
+            !node.nodeValue ||
+            isAlreadyConverted(node.nodeValue)
+        ) {
+            return;
+        }
 
-    node.nodeValue = convertText(node.nodeValue);
-}
+        var parent = node.parentElement;
+        if (parent && parent.dataset.usdConverted === "1") return;
 
-   function scan(root) {
-    const walker = document.createTreeWalker(
-        root,
-        NodeFilter.SHOW_TEXT,
-        null,
-        false
-    );
+        var newValue = convertText(node.nodeValue);
 
-    let node;
-    while ((node = walker.nextNode())) {
-        const spans = root.querySelectorAll?.('span[class*="displayPrice"]');
-        processNode(node);
-            // catch displayPrice Torn spans
-        if (spans) {
-            spans.forEach(processElement);
+        if (newValue !== node.nodeValue) {
+            if (parent) parent.dataset.usdConverted = "1";
+            node.nodeValue = newValue;
         }
     }
-}
+
+    function scan(root) {
+        var walker = document.createTreeWalker(
+            root,
+            NodeFilter.SHOW_TEXT,
+            null,
+            false
+        );
+
+        var node;
+        while ((node = walker.nextNode())) {
+            var spans = root.querySelectorAll ? root.querySelectorAll('span[class*="displayPrice"]') : null;
+            processNode(node);
+            if (spans) {
+                for (var i = 0; i < spans.length; i++) {
+                    processElement(spans[i]);
+                }
+            }
+        }
+    }
 
     scan(document.body);
 
-    const observer = new MutationObserver(mutations => {
-        for (const mutation of mutations) {
-            for (const node of mutation.addedNodes) {
+    var observer = new MutationObserver(function(mutations) {
+        for (var m = 0; m < mutations.length; m++) {
+            var mutation = mutations[m];
+            for (var n = 0; n < mutation.addedNodes.length; n++) {
+                var node = mutation.addedNodes[n];
 
                 if (node.nodeType === Node.TEXT_NODE) {
                     processNode(node);
