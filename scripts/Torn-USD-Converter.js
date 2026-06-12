@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn USD Converter
 // @author       shaul [3908280]
-// @version      1.2
+// @version      1.4
 // @description  Convert Torn cash displays to USD equivalents
 // @match        https://www.torn.com/*
 // @grant        none
@@ -10,22 +10,27 @@
 (function() {
     'use strict';
 
+    const SHOW_ORIGINAL_VALUE = true;
     const USD_PER_TORN = 5 / 23500000;
+
 
     function formatUSD(tornAmount) {
         const usd = tornAmount * USD_PER_TORN;
 
-        if (usd >= 1000000) {
-            return '$' + usd.toLocaleString(undefined, {
-                maximumFractionDigits: 0
-            });
+        if (usd <= 0.00001){
+            return '$' + usd.toFixed(6)
         }
 
-        if (usd >= 1) {
-            return '$' + usd.toLocaleString(undefined, {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2
-            });
+        if (usd <= 0.0001 ){
+            return '$' + usd.toFixed(5)
+        }
+
+        if (usd >= 9999) {
+            return '$' + usd.toFixed(0)
+        }
+
+        if (usd >= 0.01) {
+            return '$' + usd.toFixed(2)
         }
 
         return '$' + usd.toFixed(4);
@@ -45,63 +50,73 @@
 
     function convertText(text) {
         return text.replace(
-            /\$([\d,.]+)\s*([kmbt])?/gi,
+            /\$([\d,.]+)\s*([kMBT])?/gi,
             (match, value, suffix) => {
 
                 let amount = parseFloat(
                     value.replace(/,/g, '')
                 );
 
-                if (isNaN(amount)) {
-                    return match;
-                }
-
-                switch ((suffix || '').toLowerCase()) {
+                switch ((suffix || '')) {
                     case 'k':
                         amount *= 1e3;
                         break;
-                    case 'm':
+                    case 'M':
                         amount *= 1e6;
                         break;
-                    case 'b':
+                    case 'B':
                         amount *= 1e9;
                         break;
-                    case 't':
+                    case 'T':
                         amount *= 1e12;
                         break;
                 }
 
-                return formatUSD(amount) + ' (' + formatTorn(amount) + ') ';
+                return SHOW_ORIGINAL_VALUE ? formatUSD(amount) + ' (' + formatTorn(amount) + ') ' : formatUSD(amount) + ' ';
             }
         );
     }
 
+    function processElement(el) {
+        if (!el || el.dataset.usdConverted === "1") return;
+
+        const text = el.textContent;
+        if (!text || !text.includes('$')) return;
+
+        el.textContent = convertText(text);
+        el.dataset.usdConverted = "1";
+    }
+
     function processNode(node) {
-        if (
-            node.nodeType !== Node.TEXT_NODE ||
-            !node.nodeValue ||
-            !node.nodeValue.includes('$')
-        ) {
-            return;
-        }
-
-        node.nodeValue = convertText(node.nodeValue);
+    if (
+        node.nodeType !== Node.TEXT_NODE ||
+        !node.nodeValue ||
+        node.nodeValue.includes('(§')
+    ) {
+        return;
     }
 
-    function scan(root) {
-        const walker = document.createTreeWalker(
-            root,
-            NodeFilter.SHOW_TEXT,
-            null,
-            false
-        );
+    node.nodeValue = convertText(node.nodeValue);
+}
 
-        let node;
+   function scan(root) {
+    const walker = document.createTreeWalker(
+        root,
+        NodeFilter.SHOW_TEXT,
+        null,
+        false
+    );
 
-        while ((node = walker.nextNode())) {
-            processNode(node);
+    let node;
+    while ((node = walker.nextNode())) {
+        const spans = root.querySelectorAll?.('span[class*="displayPrice"]');
+        processNode(node);
+            // catch displayPrice Torn spans
+        if (spans) {
+            spans.forEach(processElement);
         }
     }
+}
 
     scan(document.body);
 
