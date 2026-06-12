@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Real Value Converter v5
 // @namespace    http://tampermonkey.net/
-// @version      5.4.7
+// @version      5.4.8
 // @description  Converts all Torn cash values to real USD using $5/23.5M rate.
 // @author       Lazuli for Shaul
 // @match        https://www.torn.com/*
@@ -35,70 +35,98 @@
         return isNaN(n) ? null : n * m;
     }
 
-    // convert a text node if it contains $amount
-    function convertNode(node) {
-        if (!node || node.nodeType !== 3) return false;
-        var text = node.textContent;
+    // convert money in a specific element
+    function convertElement(el) {
+        if (!el) return false;
+        if (el.getAttribute('data-tt-done')) return false;
+        var text = el.textContent;
         if (!text || !/\$\d/.test(text)) return false;
 
-        // walk up to find parent element
-        var el = node.parentElement;
-        if (!el) return false;
-        if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE') return false;
-        // skip if already converted
-        if (el.classList && el.classList.contains('tt-done')) return false;
-
         var regex = /\$([\d,]+(?:\.\d+)?[KMB]?)/g;
-        var match, lastIdx = 0;
-        var frag = document.createDocumentFragment();
-        var found = false;
-
-        while ((match = regex.exec(text)) !== null) {
-            found = true;
-            if (match.index > lastIdx) {
-                frag.appendChild(document.createTextNode(text.slice(lastIdx, match.index)));
-            }
-            var amount = parse('$' + match[1]);
+        var newHtml = text.replace(regex, function(match, amountStr) {
+            var amount = parse(match);
             if (amount !== null) {
-                frag.appendChild(document.createTextNode(fmt(amount * RATE)));
                 CONVERTED++;
-            } else {
-                frag.appendChild(document.createTextNode('$' + match[1]));
+                return fmt(amount * RATE);
             }
-            lastIdx = regex.lastIndex;
-        }
+            return match;
+        });
 
-        if (found && node.parentNode) {
-            if (lastIdx < text.length) {
-                frag.appendChild(document.createTextNode(text.slice(lastIdx)));
-            }
-            node.parentNode.replaceChild(frag, node);
-            // mark parent as converted
-            el.classList.add('tt-done');
+        if (newHtml !== text) {
+            el.innerHTML = newHtml;
+            el.setAttribute('data-tt-done', '1');
+            return true;
         }
-        return found;
+        return false;
     }
 
-    // sweep all text nodes
-    function sweep() {
+    // walk text nodes and convert
+    function sweepNodes() {
         if (!document.body) return;
         var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
-        var nodes = [];
-        var tn;
+        var toProcess = [];
         while (walker.nextNode()) {
-            nodes.push(walker.currentNode);
+            var node = walker.currentNode;
+            if (node.textContent && /\$\d/.test(node.textContent)) {
+                var parent = node.parentElement;
+                if (parent && !parent.getAttribute('data-tt-done') &&
+                    parent.tagName !== 'SCRIPT' && parent.tagName !== 'STYLE') {
+                    toProcess.push({node: node, parent: parent});
+                }
+            }
         }
-        for (var i = nodes.length - 1; i >= 0; i--) {
-            try { convertNode(nodes[i]); } catch(e) {}
+        // process in reverse
+        for (var i = toProcess.length - 1; i >= 0; i--) {
+            var item = toProcess[i];
+            if (item.node.parentNode) {
+                var span = document.createElement('span');
+                var text = item.node.textContent;
+                var regex = /\$([\d,]+(?:\.\d+)?[KMB]?)/g;
+                var newHtml = text.replace(regex, function(match, amountStr) {
+                    var amount = parse(match);
+                    if (amount !== null) {
+                        CONVERTED++;
+                        return '<span style="color:inherit">' + fmt(amount * RATE) + '</span>';
+                    }
+                    return match;
+                });
+                span.innerHTML = newHtml;
+                item.node.parentNode.replaceChild(span, item.node);
+                item.parent.setAttribute('data-tt-done', '1');
+            }
         }
     }
 
-    // watch for new content
+    // also target known torn money elements by selector
+    function sweepSelectors() {
+        if (!document.body) return;
+        var selectors = [
+            '#user-money',
+            '.swiss-faction-money-value',
+            '.money-positive',
+            '.money-negative',
+            '[data-money]',
+            '.profit',
+            '.bank-investment-money-cell-total',
+            '.bank-investment-money-cell-per-day'
+        ];
+        for (var s = 0; s < selectors.length; s++) {
+            var els = document.querySelectorAll(selectors[s]);
+            for (var e = 0; e < els.length; e++) {
+                convertElement(els[e]);
+            }
+        }
+    }
+
+    // watch for changes
     var obs = null;
     var timer = null;
     function onChange() {
         clearTimeout(timer);
-        timer = setTimeout(sweep, 50);
+        timer = setTimeout(function() {
+            sweepNodes();
+            sweepSelectors();
+        }, 100);
     }
     function startObs() {
         if (obs) return;
@@ -110,53 +138,23 @@
         });
     }
 
-    // also target specific torn money elements by class
-    function sweepElements() {
-        if (!document.body) return;
-        // common torn money selectors
-        var selectors = [
-            '[id="user-money"]',
-            '.swiss-faction-money-value',
-            '.money-positive',
-            '.money-negative',
-            '[data-money]'
-        ];
-        for (var s = 0; s < selectors.length; s++) {
-            var els = document.querySelectorAll(selectors[s]);
-            for (var e = 0; e < els.length; e++) {
-                var el = els[e];
-                if (el.classList.contains('tt-done')) continue;
-                var text = el.textContent;
-                if (!text || !/\$\d/.test(text)) continue;
-                var regex = /\$([\d,]+(?:\.\d+)?[KMB]?)/g;
-                var html = text.replace(regex, function(match, amount) {
-                    var parsed = parse(match);
-                    if (parsed !== null) {
-                        CONVERTED++;
-                        return fmt(parsed * RATE);
-                    }
-                    return match;
-                });
-                el.innerHTML = html;
-                el.classList.add('tt-done');
-            }
-        }
-    }
-
     function init() {
         if (!document.body) { setTimeout(init, 50); return; }
 
-        sweep();
-        sweepElements();
+        // initial conversion
+        sweepNodes();
+        sweepSelectors();
+
+        // start observer
         startObs();
 
-        // aggressive periodic sweep
+        // periodic sweep
         setInterval(function() {
-            sweep();
-            sweepElements();
+            sweepNodes();
+            sweepSelectors();
         }, 1000);
 
-        // counter
+        // counter display
         var counter = document.createElement('div');
         counter.style.cssText = 'position:fixed;bottom:3px;left:3px;z-index:999999;font:10px monospace;color:#0f0;background:rgba(0,0,0,0.8);padding:2px 6px;border-radius:2px;pointer-events:none;';
         document.body.appendChild(counter);
@@ -164,7 +162,7 @@
             if (counter.parentNode) counter.textContent = 'TRV ' + CONVERTED;
         }, 500);
 
-        console.log('[TRV] v5.4.7 loaded');
+        console.log('[TRV] v5.4.8 loaded — $5/23.5M rate');
     }
 
     if (document.readyState === 'loading') {
