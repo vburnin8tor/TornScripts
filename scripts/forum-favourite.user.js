@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Forum Favourite
 // @namespace    hardy.forum.fav
-// @version      0.2
+// @version      0.3
 // @description  Lets you put your favourite sub-forums on top.
 // @author       Father [2131687]
 // @match        https://www.torn.com/forums.php*
