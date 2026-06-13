@@ -97,6 +97,14 @@
             span.setAttribute('data-href', dataUrl);
             span.innerHTML = isFav === 'yes' ? filledStar : emptyStar;
 
+            // Mark the li so CSS can style it and so we can find it for reordering
+            li.setAttribute('isFav', isFav);
+
+            // Move existing favourites to the top of the list immediately
+            if (isFav === 'yes') {
+                moveLiToTop(li, forumList);
+            }
+
             span.addEventListener('click', onStarClick);
 
             var desc = li.querySelector('.name a .desc');
@@ -114,19 +122,58 @@
         var idx = span.getAttribute('data-index');
         var href = span.getAttribute('data-href');
         var isSelected = span.getAttribute('isFav') === 'yes';
+        // Walk up from the star span to find the parent li element
+        var li = span.parentElement;
+        while (li && li.tagName !== 'LI') {
+            li = li.parentElement;
+        }
+        var forumList = li ? li.parentElement : null;
 
         if (isSelected) {
             span.innerHTML = emptyStar;
             span.setAttribute('isFav', 'no');
+            if (li) li.setAttribute('isFav', 'no');
             saved[idx] = removeFromArray(saved[idx] || [], href);
+            // Move unfavourited item to after the last non-fav item
+            if (li && forumList) moveLiToEnd(li, forumList);
         } else {
             span.innerHTML = filledStar;
             span.setAttribute('isFav', 'yes');
+            if (li) {
+                li.setAttribute('isFav', 'yes');
+                if (forumList) moveLiToTop(li, forumList);
+            }
             if (!saved[idx]) saved[idx] = [];
             saved[idx].push(href);
         }
 
         save();
+    }
+
+    // Move an unfavourited li to the end of the forum-list
+    function moveLiToEnd(li, forumList) {
+        if (!forumList) return;
+        // Find the last li in the list and insert after it
+        var allLis = forumList.querySelectorAll('li[data-href^="forums.php?p=forums"]');
+        var last = null;
+        for (var i = 0; i < allLis.length; i++) {
+            last = allLis[i];
+        }
+        if (last && last !== li && last.nextSibling) {
+            forumList.insertBefore(li, last.nextSibling);
+        } else if (last && last !== li) {
+            forumList.appendChild(li);
+        }
+    }
+
+    // Move a favourited li to the top of its forum-list parent
+    // Uses insertBefore since flex order doesn't always work on Torn's DOM
+    function moveLiToTop(li, forumList) {
+        if (!forumList) return;
+        var first = forumList.querySelector('li[data-href^="forums.php?p=forums"]');
+        if (first && first !== li) {
+            forumList.insertBefore(li, first);
+        }
     }
 
     function loadSaved() {
