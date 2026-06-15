@@ -124,28 +124,35 @@
     }
 
     function processElement(el) {
-        if (!el || el.dataset.usdConverted === "1") return;
+            if (!el || el.dataset.usdConverted === "1") return;
+            // skip our own settings panel elements
+            if (el.id && el.id.indexOf('tusd') !== -1) return;
+            if (el.closest && el.closest('#tusd-overlay, #tusd-sbtn')) return;
 
-        const text = el.textContent;
-        if (!text || !text.includes('$')) return;
+            const text = el.textContent;
+            if (!text || !text.includes('$')) return;
 
-        el.textContent = convertText(text);
-        el.dataset.usdConverted = "1";
+            el.textContent = convertText(text);
+            el.dataset.usdConverted = "1";
+        }
+
+        function processNode(node) {
+        	if ( 
+        	node.nodeType !== Node.TEXT_NODE || 
+        	!node.nodeValue || 
+        	node.nodeValue.includes('(§') || 
+        	node.nodeValue.includes('($')     
+        	)    
+        	{
+            return;
+        }
+        // skip text inside our own settings panel
+        var p = node.parentElement;
+        if (p && (p.id && p.id.indexOf('tusd') !== -1)) return;
+        if (p && p.closest && p.closest('#tusd-overlay, #tusd-sbtn')) return;
+
+        node.nodeValue = convertText(node.nodeValue);
     }
-
-    function processNode(node) {
-    	if ( 
-    	node.nodeType !== Node.TEXT_NODE || 
-    	!node.nodeValue || 
-    	node.nodeValue.includes('(§') || 
-    	node.nodeValue.includes('($')     
-    	)    
-    {
-        return;
-    }
-
-    node.nodeValue = convertText(node.nodeValue);
-}
 
    function scan(root) {
     const walker = document.createTreeWalker(

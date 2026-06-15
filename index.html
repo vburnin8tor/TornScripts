@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Torn Scripts</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <canvas id="rain"></canvas>
+
+  <button id="rabbitBtn" class="rabbit-btn" aria-label="Open code rain settings" title="Code Rain Settings">
+    <svg viewBox="0 0 64 64" aria-hidden="true">
+      <path d="M16 41c0-9 7-16 16-16s16 7 16 16-7 15-16 15-16-6-16-15z"/>
+      <path d="M24 24c-5-7-6-14-2-17 4-3 9 3 11 11"/>
+      <path d="M39 24c1-9 6-14 10-12 4 2 3 10-2 18"/>
+      <circle cx="40" cy="37" r="2.4"/>
+      <path d="M30 43c3 2 7 2 10 0"/>
+    </svg>
+  </button>
+
+  <div id="settingsModal" class="modal" aria-hidden="true" role="dialog" aria-labelledby="settingsTitle">
+    <div class="modal-card">
+      <h2 id="settingsTitle">Code Rain Settings</h2>
+      <label>Rain color
+        <input type="color" id="colorInput" value="#4dff4d" />
+      </label>
+      <label>Speed (chars/sec)
+        <input type="range" id="speedInput" min="6" max="60" step="1" value="24" />
+        <span id="speedValue">24</span>
+      </label>
+      <label>Tail length
+        <input type="range" id="tailInput" min="4" max="50" step="1" value="18" />
+        <span id="tailValue">18</span>
+      </label>
+      <label>Characters (one continuous string)
+        <textarea id="charsInput" rows="5"></textarea>
+      </label>
+      <div class="actions">
+        <button id="resetBtn" type="button">Reset to Matrix set</button>
+        <button id="closeBtn" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <main class="scripts-list">
+    <h1>Torn Scripts</h1>
+    <p class="subtitle">Tampermonkey/Greasemonkey userscripts for Torn.com</p>
+
+    <article class="script-card">
+      <h2>Torn Real Value Converter <span class="version">v5.4.6</span></h2>
+      <p>Converts all Torn cash values to real USD using the classic $5/23.5M rate. Replaces every $amount on every page. No APIs, no keys, no settings — just math.</p>
+      <div class="script-meta">
+        <span class="tag">global</span>
+        <span class="tag">conversion</span>
+        <span class="tag">inline</span>
+      </div>
+      <div class="script-actions">
+        <a href="scripts/torn-real-value-converter.user.js" class="btn btn-primary" download>Install Script</a>
+        <a href="https://github.com/vburnin8tor/TornScripts/blob/main/scripts/torn-real-value-converter.user.js" class="btn btn-secondary" target="_blank">View Source</a>
+      </div>
+    </article>
+
+    <article class="script-card">
+      <h2>Like Looking in a Mirror <span class="version">v1.0.0</span></h2>
+      <p>Duplicates your profile picture and honor bar panel onto Torn Home for quick mirror vibes.</p>
+      <div class="script-meta">
+        <span class="tag">home</span>
+        <span class="tag">profile</span>
+        <span class="tag">ui</span>
+      </div>
+      <div class="script-actions">
+        <a href="scripts/like-looking-in-a-mirror.user.js" class="btn btn-primary" download>Install Script</a>
+        <a href="https://github.com/vburnin8tor/TornScripts/blob/main/scripts/like-looking-in-a-mirror.user.js" class="btn btn-secondary" target="_blank">View Source</a>
+      </div>
+    </article>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
