@@ -163,13 +163,13 @@
                 for (var i = 0; i < children.length; i++) {
                     var child = children[i];
                     var childText = child.textContent;
-                    if (childText.indexOf('$') !== -1) {
+                    // skip if already converted (contains §) or no $ price
+                    if (childText.indexOf('$') !== -1 && childText.indexOf('§') === -1) {
                         var lines = convertSinglePrice(childText);
                         if (lines) {
                             child.innerHTML = lines.join('<br>');
                         }
                     }
-                    // total span (no $) is item count — skip it
                 }
                 el.dataset.usdConverted = "1";
                 return;
@@ -177,6 +177,8 @@
 
             // item market price divs: stacked torn / usd
             if (isItemMarketPrice(el)) {
+                // skip if already converted
+                if (text.indexOf('§') !== -1) return;
                 var lines = convertSinglePrice(text);
                 if (lines) {
                     el.innerHTML = lines.join('<br>');
