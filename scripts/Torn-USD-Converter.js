@@ -140,20 +140,30 @@
             // skip already-converted text (converted output has ($ or (§)
             if (text.includes('(§') || text.includes('($')) return;
 
-            // item market priceandTotal div: convert only the $ price span
+            // item market priceandTotal div: stacked torn / usd / total
             // structure: <span>$410</span><span class="titleTotal___..."> (215,463)</span>
-            // the total span is item count, NOT a price — leave it alone
+            // the total span is item count — pass through unchanged
             if (isItemMarketPriceAndTotal(el)) {
+                if (el.dataset.usdConverted === "1") return;
                 var children = el.children;
+                var priceText = "";
+                var totalText = "";
                 for (var i = 0; i < children.length; i++) {
-                    var child = children[i];
-                    var childText = child.textContent;
-                    // skip if already converted (contains §) or no $ price
-                    if (childText.indexOf('$') !== -1 && childText.indexOf('§') === -1) {
-                        var lines = convertSinglePrice(childText);
-                        if (lines) {
-                            child.innerHTML = lines.join('<br>');
+                    var childText = children[i].textContent;
+                    if (childText.indexOf('$') !== -1) {
+                        priceText = childText;
+                    } else {
+                        totalText = childText;
+                    }
+                }
+                if (priceText) {
+                    var lines = convertSinglePrice(priceText);
+                    if (lines) {
+                        var html = lines.join('<br>');
+                        if (totalText) {
+                            html += '<br>' + totalText;
                         }
+                        el.innerHTML = html;
                     }
                 }
                 el.dataset.usdConverted = "1";
