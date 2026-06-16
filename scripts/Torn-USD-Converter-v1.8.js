@@ -170,39 +170,42 @@
 
             var torn = converted[0];
             var usd = converted[1];
+            var price = priceText;
+            var total = totalText;
             var stack = [];
 
             switch (DISPLAY_MODE) {
+
                 case 'converted':
-                    stack = [usd, totalText];
+                    stack = [usd + ' (' + total + ')'];
                     break;
 
                 case 'combined':
-                    stack = [usd + ' (' + torn + ')', totalText];
+                    stack = [usd + ' (' + torn + ') (' + total + ')'];
                     break;
 
                 case 'reversed':
-                    stack = [torn + ' (' + usd + ')', totalText];
+                    stack = [torn + ' (' + usd + ') (' + total + ')'];
                     break;
 
                 case 'full':
-                    stack = [usd + ' (' + priceText.replace('$', '§') + ')', totalText];
+                    stack = [usd + ' (' + price.replace('$', '§') + ') (' + total + ')'];
                     break;
 
                 case 'fullreversed':
-                    stack = [priceText.replace('$', '§') + ' (' + usd + ')', totalText];
+                    stack = [price.replace('$', '§') + ' (' + usd + ') (' + total + ')'];
                     break;
 
                 case 'original':
-                    stack = [priceText.replace('$', '§'), totalText];
+                    stack = [price.replace('$', '§') + ' (' + total + ')'];
                     break;
 
                 default:
-                    stack = [priceText.replace('$', '§') + ' (' + usd + ')', totalText];
+                    stack = [price.replace('$', '§') + ' (' + usd + ') (' + total + ')'];
             }
 
             // rebuild the whole div with stacked lines
-            el.innerHTML = stack.filter(function(l){return l;}).join('<br>');
+            el.innerHTML = stack.join('<br>');
             el.dataset.usdConverted = '1';
             return;
         }
