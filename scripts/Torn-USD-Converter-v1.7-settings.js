@@ -122,12 +122,41 @@
     }
 
     function isItemMarketPrice(el) {
-        // item market price/total divs — just swap $ to §, no full conversion
-        if (el.tagName === 'DIV') {
-            var cls = el.className || '';
-            if (cls.indexOf('price') !== -1 || cls.indexOf('priceandTotal') !== -1) return true;
+        if (el.tagName !== 'DIV') return false;
+        var cls = el.className || '';
+        return cls.indexOf('price') !== -1;
+    }
+
+    function isItemMarketPriceAndTotal(el) {
+        if (el.tagName !== 'DIV') return false;
+        var cls = el.className || '';
+        return cls.indexOf('priceandTotal') !== -1;
+    }
+
+    function convertItemMarketPrice(text) {
+        // returns [tornLine, usdLine] for a single price
+        var match = text.match(/\$([\d,.]+)/);
+        if (!match) return null;
+        var amount = parseFloat(match[1].replace(/,/g, ''));
+        if (isNaN(amount)) return null;
+        return [formatTorn(amount), formatUSD(amount)];
+    }
+
+    function convertItemMarketPriceAndTotal(text) {
+        // text looks like "$356 ($215,428)" — price then total in parens
+        var parts = text.match(/\$([\d,.]+)\s*\(\$([\d,.]+)\)/);
+        if (!parts) {
+            // fallback: just a single price
+            var m = text.match(/\$([\d,.]+)/);
+            if (!m) return null;
+            var amt = parseFloat(m[1].replace(/,/g, ''));
+            if (isNaN(amt)) return null;
+            return [formatTorn(amt), formatUSD(amt), ''];
         }
-        return false;
+        var price = parseFloat(parts[1].replace(/,/g, ''));
+        var total = parseFloat(parts[2].replace(/,/g, ''));
+        if (isNaN(price) || isNaN(total)) return null;
+        return [formatTorn(price), formatUSD(price), formatTorn(total)];
     }
 
     function processElement(el) {
@@ -141,10 +170,23 @@
             // skip already-converted text (converted output has ($ or (§)
             if (text.includes('(§') || text.includes('($')) return;
 
-            // item market price divs: just swap $ to § to avoid overflow
+            // item market priceandTotal divs: stacked torn / usd / total
+            if (isItemMarketPriceAndTotal(el)) {
+                var lines = convertItemMarketPriceAndTotal(text);
+                if (lines) {
+                    el.innerHTML = lines.filter(function(l){return l;}).join('<br>');
+                    el.dataset.usdConverted = "1";
+                }
+                return;
+            }
+
+            // item market price divs: stacked torn / usd
             if (isItemMarketPrice(el)) {
-                el.textContent = text.replace(/\$/g, '§');
-                el.dataset.usdConverted = "1";
+                var lines = convertItemMarketPrice(text);
+                if (lines) {
+                    el.innerHTML = lines.join('<br>');
+                    el.dataset.usdConverted = "1";
+                }
                 return;
             }
 
