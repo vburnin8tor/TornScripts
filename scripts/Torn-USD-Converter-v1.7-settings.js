@@ -121,6 +121,15 @@
         );
     }
 
+    function isItemMarketPrice(el) {
+        // item market price/total divs — just swap $ to §, no full conversion
+        if (el.tagName === 'DIV') {
+            var cls = el.className || '';
+            if (cls.indexOf('price') !== -1 || cls.indexOf('priceandTotal') !== -1) return true;
+        }
+        return false;
+    }
+
     function processElement(el) {
             if (!el || el.dataset.usdConverted === "1") return;
             // skip our own settings panel elements
@@ -131,6 +140,13 @@
             if (!text || !text.includes('$')) return;
             // skip already-converted text (converted output has ($ or (§)
             if (text.includes('(§') || text.includes('($')) return;
+
+            // item market price divs: just swap $ to § to avoid overflow
+            if (isItemMarketPrice(el)) {
+                el.textContent = text.replace(/\$/g, '§');
+                el.dataset.usdConverted = "1";
+                return;
+            }
 
             el.textContent = convertText(text);
             el.dataset.usdConverted = "1";
