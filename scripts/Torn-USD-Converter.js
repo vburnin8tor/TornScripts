@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn USD Converter
 // @author       shaul [3908280]
-// @version      1.5
+// @version      1.6
 // @description  Convert Torn cash displays to USD equivalents
 // @match        https://www.torn.com/*
 // @grant        none
@@ -71,7 +71,7 @@
  
         var fullamount = text;
         return text.replace(
-            /\$([\d,.]+)\s?([kMBT]|mil|bil| mil| bil)?/g,
+            /\$([\d,.]+)([kMBT]|mil|bil| mil| bil)?/g,
             (match, value, suffix) => {
  
                 let amount = parseFloat(value.replace(/,/g, ''))
@@ -105,7 +105,7 @@
 					case 'fullreversed':
 						return fullamount.toLocaleString().replace(/\$/, '§') + ' (' + formatUSD(amount) + ') ';
                     case 'original':
-                        return fullamount.toLocaleString().replace(/\$/, '§');
+                        return formatTorn(amount);
  
                 }
             }
@@ -113,14 +113,16 @@
     }
  
     function processElement(el) {
-        if (!el || el.dataset.usdConverted === "1") return;
- 
-        const text = el.textContent;
-        if (!text || !text.includes('$')) return;
- 
-        el.textContent = convertText(text);
-        el.dataset.usdConverted = "1";
-    }
+            if (!el || el.dataset.usdConverted === "1") return;
+
+            const text = el.textContent;
+            if (!text || !text.includes('$')) return;
+            // skip already-converted text (converted output has ($ or (§)
+            if (text.includes('(§') || text.includes('($')) return;
+
+            el.textContent = convertText(text);
+            el.dataset.usdConverted = "1";
+        }
  
     function processNode(node) {
     	if ( 
@@ -143,15 +145,16 @@
         null,
         false
     );
- 
+
+    // process displayPrice spans once before walking text nodes
+    var spans = root.querySelectorAll?.('span[class*="displayPrice"]');
+    if (spans) {
+        spans.forEach(processElement);
+    }
+
     let node;
     while ((node = walker.nextNode())) {
-        const spans = root.querySelectorAll?.('span[class*="displayPrice"]');
         processNode(node);
-            // catch displayPrice Torn spans
-        if (spans) {
-            spans.forEach(processElement);
-        }
     }
 }
  
