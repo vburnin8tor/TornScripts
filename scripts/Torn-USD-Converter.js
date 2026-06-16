@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn USD Converter
 // @author       shaul [3908280]
-// @version      1.6
+// @version      1.7
 // @description  Convert Torn cash displays to USD equivalents
 // @match        https://www.torn.com/*
 // @grant        GM_getValue
@@ -82,7 +82,7 @@
 
         var fullamount = text;
         return text.replace(
-            /\$([\d,.]+)\s?([kMBT]|mil|bil| mil| bil)?/g,
+            /\$([\d,.]+)([kMBT]|mil|bil| mil| bil)?/g,
             (match, value, suffix) => {
 
                 let amount = parseFloat(value.replace(/,/g, ''))
@@ -278,7 +278,7 @@
             '<div class="tusd-hint">current: ' + displayMode + ' \u2014 changes reload the page</div>' +
             '<button class="tusd-btn" id="tusd-save">Save &amp; Reload</button>' +
             '<button class="tusd-btn" id="tusd-cancel">Cancel</button>' +
-            '<div class="tusd-meta">v1.6 \u2022 shaul [3908280] \u2022 ' +
+            '<div class="tusd-meta">v1.7 \u2022 shaul [3908280] \u2022 ' +
             '<a href="#" id="tusd-tm-link" style="color:#555">tampermonkey dashboard</a></div>';
 
         overlay.appendChild(modal);
