@@ -135,30 +135,13 @@
         return cls.indexOf('priceandTotal') !== -1;
     }
 
-    function convertItemMarketPrice(text) {
+    function convertSinglePrice(text) {
         // returns [tornLine, usdLine] for a single $price
         var match = text.match(/\$([\d,.]+)/);
         if (!match) return null;
         var amount = parseFloat(match[1].replace(/,/g, ''));
         if (isNaN(amount)) return null;
         return [formatTorn(amount), formatUSD(amount)];
-    }
-
-    function convertItemMarketPriceAndTotal(text) {
-        // text looks like "$356 (215,428)" — $price then total in parens (no $ on total)
-        var parts = text.match(/\$([\d,.]+)\s*\(([\d,.]+)\)/);
-        if (!parts) {
-            // fallback: just a single $price
-            var m = text.match(/\$([\d,.]+)/);
-            if (!m) return null;
-            var amt = parseFloat(m[1].replace(/,/g, ''));
-            if (isNaN(amt)) return null;
-            return [formatTorn(amt), formatUSD(amt), ''];
-        }
-        var price = parseFloat(parts[1].replace(/,/g, ''));
-        var total = parseFloat(parts[2].replace(/,/g, ''));
-        if (isNaN(price) || isNaN(total)) return null;
-        return [formatTorn(price), formatUSD(price), formatTorn(total)];
     }
 
     function processElement(el) {
@@ -172,19 +155,29 @@
             // skip already-converted text (converted output has ($ or (§)
             if (text.includes('(§') || text.includes('($')) return;
 
-            // item market priceandTotal divs: stacked torn / usd / total
+            // item market priceandTotal div: convert only the $ price span
+            // structure: <span>$410</span><span class="titleTotal___..."> (215,463)</span>
+            // the total span is item count, NOT a price — leave it alone
             if (isItemMarketPriceAndTotal(el)) {
-                var lines = convertItemMarketPriceAndTotal(text);
-                if (lines) {
-                    el.innerHTML = lines.filter(function(l){return l;}).join('<br>');
-                    el.dataset.usdConverted = "1";
+                var children = el.children;
+                for (var i = 0; i < children.length; i++) {
+                    var child = children[i];
+                    var childText = child.textContent;
+                    if (childText.indexOf('$') !== -1) {
+                        var lines = convertSinglePrice(childText);
+                        if (lines) {
+                            child.innerHTML = lines.join('<br>');
+                        }
+                    }
+                    // total span (no $) is item count — skip it
                 }
+                el.dataset.usdConverted = "1";
                 return;
             }
 
             // item market price divs: stacked torn / usd
             if (isItemMarketPrice(el)) {
-                var lines = convertItemMarketPrice(text);
+                var lines = convertSinglePrice(text);
                 if (lines) {
                     el.innerHTML = lines.join('<br>');
                     el.dataset.usdConverted = "1";
