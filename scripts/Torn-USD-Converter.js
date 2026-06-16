@@ -113,6 +113,8 @@
     function isItemMarketPrice(el) {
         if (el.tagName !== 'DIV') return false;
         var cls = el.className || '';
+        // match "price" but NOT "priceandTotal" — that's handled separately
+        if (cls.indexOf('priceandTotal') !== -1) return false;
         return cls.indexOf('price') !== -1;
     }
 
@@ -123,7 +125,7 @@
     }
 
     function convertItemMarketPrice(text) {
-        // returns [tornLine, usdLine] for a single price
+        // returns [tornLine, usdLine] for a single $price
         var match = text.match(/\$([\d,.]+)/);
         if (!match) return null;
         var amount = parseFloat(match[1].replace(/,/g, ''));
@@ -132,10 +134,10 @@
     }
 
     function convertItemMarketPriceAndTotal(text) {
-        // text looks like "$356 ($215,428)" — price then total in parens
-        var parts = text.match(/\$([\d,.]+)\s*\(\$([\d,.]+)\)/);
+        // text looks like "$356 (215,428)" — $price then total in parens (no $ on total)
+        var parts = text.match(/\$([\d,.]+)\s*\(([\d,.]+)\)/);
         if (!parts) {
-            // fallback: just a single price
+            // fallback: just a single $price
             var m = text.match(/\$([\d,.]+)/);
             if (!m) return null;
             var amt = parseFloat(m[1].replace(/,/g, ''));
