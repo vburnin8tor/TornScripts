@@ -22,7 +22,7 @@
         // "reversed"     -> §23.5M ($5.00)
         // "full"         -> $5.00 (§23,500,001)
 	// "fullreversed" -> §23,500,001 ($5.00)
-        // "original"     -> §23.5M
+        // "original"     -> §89,984 (exact, no abbreviation)
  
     const USD_PER_TORN = 5 / 23500000;
  
@@ -68,8 +68,6 @@
     }
  
     function convertText(text) {
- 
-        var fullamount = text;
         return text.replace(
             /\$([\d,.]+)([kMBT]|mil|bil| mil| bil)?/g,
             (match, value, suffix) => {
@@ -101,11 +99,11 @@
                     case 'reversed':
                         return formatTorn(amount) + ' (' + formatUSD(amount) + ') ';
                     case 'full':
-                        return formatUSD(amount) + ' (' + fullamount.toLocaleString().replace(/\$/, '§') + ') ';
+                        return formatUSD(amount) + ' (' + match.replace(/\$/, '§') + ') ';
 					case 'fullreversed':
-						return fullamount.toLocaleString().replace(/\$/, '§') + ' (' + formatUSD(amount) + ') ';
+						return match.replace(/\$/, '§') + ' (' + formatUSD(amount) + ') ';
                     case 'original':
-                        return formatTorn(amount);
+                        return match.replace(/\$/, '§');
  
                 }
             }
