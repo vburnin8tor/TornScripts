@@ -144,10 +144,12 @@
         false
     );
 
-    // process displayPrice spans once before walking text nodes
-    var spans = root.querySelectorAll?.('span[class*="displayPrice"]');
-    if (spans) {
-        spans.forEach(processElement);
+    // process item market + displayPrice spans once before walking text nodes
+    var priceEls = root.querySelectorAll?.(
+        'span[class*="displayPrice"], div[class*="price"], div[class*="priceandTotal"]'
+    );
+    if (priceEls) {
+        priceEls.forEach(processElement);
     }
 
     let node;
