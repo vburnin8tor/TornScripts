@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Forum Favourite
 // @namespace    torn.forum.fav
-// @version      0.3
+// @version      0.9
 // @description  Lets you put your favourite sub-forums on top.
 // @author       shaul [3908280]
 // @match        https://www.torn.com/forums.php*
@@ -11,17 +11,20 @@
 // @grant        GM_addStyle
 // ==/UserScript==
 
-(function () {
+(function() {
     'use strict';
 
-    var STORAGE_KEY = 'torn_forum_fav';
+    var STORAGE_KEY = 'ff_forum_fav';
     var POLL_INTERVAL = 250;
     var STAR_COLOR = '#f3da35';
 
     var saved = loadSaved();
 
+    var pollTimer = null;
+    var processedLists = [];
+
     GM_addStyle(
-        '.forumFavStar { padding: 6px; cursor: pointer; display: inline-flex; align-items: center; vertical-align: middle; font-size: 15px; line-height: 1; color: ' + STAR_COLOR + '; }' +
+        '.ffStar { padding: 6px; cursor: pointer; display: inline-flex; align-items: center; vertical-align: middle; font-size: 15px; line-height: 1; color: ' + STAR_COLOR + '; }' +
         '.forum-list { display: flex!important; flex-direction: column; }' +
         'li[isFav="yes"] { order: -1; }'
     );
@@ -31,65 +34,84 @@
 
     function onHashChange() {
         clearInterval(pollTimer);
+        processedLists = [];
+
         var hash = window.location.hash;
         if (!hash || hash === '' || hash.indexOf('/p=main') !== -1 || hash.indexOf('#/p=') !== 0) {
             startPolling();
         }
     }
 
-    var pollTimer = null;
-
     function startPolling() {
-        pollTimer = setInterval(function () {
+        pollTimer = setInterval(function() {
             var forumLists = document.querySelectorAll('.forum-list:not([data-ff-processed])');
-            if (!forumLists.length) return;
+            if (forumLists.length === 0) return;
+
+            var index = processedLists.length;
+            var anyNew = false;
 
             for (var i = 0; i < forumLists.length; i++) {
                 var forumList = forumLists[i];
                 forumList.setAttribute('data-ff-processed', 'true');
-                processList(forumList);
+                anyNew = true;
+
+                // Skip index 0 — usually the main category header list
+                if (index === 0) {
+                    processedLists.push(true);
+                    index += 1;
+                    continue;
+                }
+
+                processList(forumList, index);
+                processedLists.push(true);
+                index += 1;
             }
 
-            if (!document.querySelectorAll('.forum-list:not([data-ff-processed])').length) {
-                clearInterval(pollTimer);
-                pollTimer = null;
+            if (anyNew) {
+                var remaining = document.querySelectorAll('.forum-list:not([data-ff-processed])');
+                if (remaining.length === 0) {
+                    clearInterval(pollTimer);
+                    pollTimer = null;
+                }
             }
         }, POLL_INTERVAL);
     }
 
-    function processList(forumList) {
+    function processList(forumList, index) {
         var liList = forumList.querySelectorAll('li[data-href^="forums.php?p=forums"]');
-        var idxKey = getGroupIndex(forumList);
+        var idxKey = index.toString();
 
         for (var i = 0; i < liList.length; i++) {
             var li = liList[i];
-            if (li.querySelector('.forumFavStar')) continue;
-
             var dataUrl = li.getAttribute('data-href');
-            var isFav = saved[idxKey] && saved[idxKey].indexOf(dataUrl) !== -1;
+
+            // Skip if this li already has a star
+            if (li.querySelector('.ffStar')) continue;
 
             var span = document.createElement('span');
-            span.className = 'forumFavStar';
-            span.textContent = isFav ? '\u2605' : '\u2606';
-            span.setAttribute('isFav', isFav ? 'yes' : 'no');
-            span.setAttribute('data-href', dataUrl);
+            span.className = 'ffStar';
 
-            li.setAttribute('isFav', isFav ? 'yes' : 'no');
-            if (isFav) moveLiToTop(li, forumList);
+            var isFav = saved[idxKey] && saved[idxKey].indexOf(dataUrl) !== -1 ? 'yes' : 'no';
+            span.setAttribute('isFav', isFav);
+            span.setAttribute('data-index', idxKey);
+            span.setAttribute('data-href', dataUrl);
+            span.textContent = isFav === 'yes' ? '\u2605' : '\u2606';
+
+            // Mark the li so CSS can style it and so we can find it for reordering
+            li.setAttribute('isFav', isFav);
+
+            // Move existing favourites to the top of the list immediately
+            if (isFav === 'yes') {
+                moveLiToTop(li, forumList);
+            }
 
             span.addEventListener('click', onStarClick);
 
             var desc = li.querySelector('.name a .desc');
-            if (desc) desc.appendChild(span);
+            if (desc) {
+                desc.appendChild(span);
+            }
         }
-    }
-
-    function getGroupIndex(forumList) {
-        var lists = document.querySelectorAll('.forum-list');
-        for (var i = 0; i < lists.length; i++) {
-            if (lists[i] === forumList) return String(Math.max(0, i - 1));
-        }
-        return '0';
     }
 
     function onStarClick(e) {
@@ -97,19 +119,22 @@
         e.stopPropagation();
 
         var span = e.currentTarget;
+        var idx = span.getAttribute('data-index');
         var href = span.getAttribute('data-href');
-        var wasFav = span.getAttribute('isFav') === 'yes';
-
+        var isSelected = span.getAttribute('isFav') === 'yes';
+        // Walk up from the star span to find the parent li element
         var li = span.parentElement;
-        while (li && li.tagName !== 'LI') li = li.parentElement;
+        while (li && li.tagName !== 'LI') {
+            li = li.parentElement;
+        }
         var forumList = li ? li.parentElement : null;
 
-        if (wasFav) {
+        if (isSelected) {
             span.textContent = '\u2606';
             span.setAttribute('isFav', 'no');
             if (li) li.setAttribute('isFav', 'no');
-            var idx = getGroupIndex(forumList);
-            saved[idx] = (saved[idx] || []).filter(function (h) { return h !== href; });
+            saved[idx] = removeFromArray(saved[idx] || [], href);
+            // Move unfavourited item to after the last non-fav item
             if (li && forumList) moveLiToEnd(li, forumList);
         } else {
             span.textContent = '\u2605';
@@ -118,7 +143,6 @@
                 li.setAttribute('isFav', 'yes');
                 if (forumList) moveLiToTop(li, forumList);
             }
-            var idx = getGroupIndex(forumList);
             if (!saved[idx]) saved[idx] = [];
             saved[idx].push(href);
         }
@@ -126,22 +150,30 @@
         save();
     }
 
+    // Move an unfavourited li to the end of the forum-list
     function moveLiToEnd(li, forumList) {
         if (!forumList) return;
-        var last = forumList.lastElementChild;
-        if (last && last !== li) {
+        // Find the last li in the list and insert after it
+        var allLis = forumList.querySelectorAll('li[data-href^="forums.php?p=forums"]');
+        var last = null;
+        for (var i = 0; i < allLis.length; i++) {
+            last = allLis[i];
+        }
+        if (last && last !== li && last.nextSibling) {
             forumList.insertBefore(li, last.nextSibling);
-        } else if (last === li) {
-            // already last, do nothing
-        } else {
+        } else if (last && last !== li) {
             forumList.appendChild(li);
         }
     }
 
+    // Move a favourited li to the top of its forum-list parent
+    // Uses insertBefore since flex order doesn't always work on Torn's DOM
     function moveLiToTop(li, forumList) {
         if (!forumList) return;
         var first = forumList.querySelector('li[data-href^="forums.php?p=forums"]');
-        if (first && first !== li) forumList.insertBefore(li, first);
+        if (first && first !== li) {
+            forumList.insertBefore(li, first);
+        }
     }
 
     function loadSaved() {
@@ -149,17 +181,29 @@
             var raw = GM_getValue(STORAGE_KEY);
             if (raw) {
                 var parsed = JSON.parse(raw);
-                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                // Validate shape
+                if (parsed && typeof parsed === 'object') {
                     return parsed;
                 }
             }
         } catch (e) {
-            console.warn('[ForumFav] Failed to load saved data, resetting.');
+            console.log('[ForumFav] Failed to load saved data, resetting.');
         }
         return { '0': [], '1': [], '2': [], '3': [] };
     }
 
     function save() {
-        GM_setValue(STORAGE_KEY, JSON.stringify(saved));
+        var stringed = JSON.stringify(saved);
+        GM_setValue(STORAGE_KEY, stringed);
+    }
+
+    function removeFromArray(arr, item) {
+        var result = [];
+        for (var i = 0; i < arr.length; i++) {
+            if (arr[i] !== item) {
+                result.push(arr[i]);
+            }
+        }
+        return result;
     }
 })();
