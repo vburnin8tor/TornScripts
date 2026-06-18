@@ -35,17 +35,17 @@
     const PRICE_SELECTOR =
         'span[class*="displayPrice"], div[class*="price"], div[class*="priceandTotal"]';
 
-    const isBadgeMode = DISPLAY_MODE === 'badge';
+    // =========================
+    // BADGE STYLING (for "badge" mode only)
+    // =========================
+    const BADGE_CLASS = "usd-converter-badge";
 
-    // =========================
-    // INJECTED STYLES
-    // =========================
-    function ensureStyles() {
+    function ensureBadgeStyle() {
         if (document.getElementById("usd-converter-style")) return;
         const style = document.createElement("style");
         style.id = "usd-converter-style";
         style.textContent = `
-            .usd-converter-badge {
+            .${BADGE_CLASS} {
                 font-size: 0.75em;
                 opacity: 0.7;
                 margin-left: 4px;
@@ -124,10 +124,10 @@
     }
 
     // =========================
-    // CONVERTED TEXT (for non-badge modes)
+    // TEXT CONVERSION (for non-badge modes)
     // =========================
 
-    function getConvertedText(text) {
+    function convertText(text) {
         return text.replace(PRICE_REGEX, (match, value, suffix) => {
             const amount = parseTornAmount(value, suffix);
             if (amount == null) return match;
@@ -158,33 +158,18 @@
     }
 
     // =========================
-    // HIDDEN ORIGINAL PRICE
-    // Keeps the original $ price in the DOM (visually hidden) so other scripts
-    // that scan for $ prices can still find it.
-    // =========================
-
-    function hideOriginalPrice(el, originalText) {
-        if (el.dataset.usdOriginal === '1') return;
-        const hidden = document.createElement("span");
-        hidden.style.cssText = "position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap";
-        hidden.textContent = originalText;
-        el.dataset.usdOriginal = "1";
-        el.insertBefore(hidden, el.firstChild);
-    }
-
-    // =========================
-    // BADGE CREATION
+    // BADGE CREATION (for "badge" mode)
     // =========================
 
     function createUSDBadge(usdText) {
         const span = document.createElement("span");
-        span.className = "usd-converter-badge";
+        span.className = BADGE_CLASS;
         span.textContent = usdText;
         return span;
     }
 
     function hasBadge(el) {
-        return el.querySelector('.usd-converter-badge') !== null;
+        return el.querySelector(`.${BADGE_CLASS}`) !== null;
     }
 
     function appendBadgeToElement(el, usdText) {
@@ -220,6 +205,7 @@
     function processElementBadge(el) {
         if (!el || el.dataset.usdConverted === '1') return;
 
+        // STRUCTURED PRICE BLOCK
         if (isPriceAndTotalElement(el)) {
             const priceSpan = el.querySelector('priceAndTotal');
             if (!priceSpan) return;
@@ -227,21 +213,26 @@
             const converted = convertSinglePrice(priceSpan.textContent);
             if (!converted) return;
 
-            appendBadgeToElement(priceSpan, converted[1]);
+            const usd = converted[1];
+            appendBadgeToElement(priceSpan, usd);
+
             el.dataset.usdConverted = '1';
             return;
         }
 
+        // NORMAL PRICE BLOCK
         if (isPriceElement(el)) {
             const converted = convertSinglePrice(el.textContent);
             if (!converted) return;
 
-            appendBadgeToElement(el, converted[1]);
+            const usd = converted[1];
+            appendBadgeToElement(el, usd);
+
             el.dataset.usdConverted = '1';
             return;
         }
 
-        // FALLBACK TEXT
+        // FALLBACK TEXT — walk text nodes and append badges
         const text = el.textContent;
         if (!text || !text.includes('$')) return;
         if (text.includes('(§') || text.includes('($')) return;
@@ -255,12 +246,17 @@
         const nodesToProcess = [];
         let node;
         while ((node = walker.nextNode())) {
-            if (node.nodeValue && node.nodeValue.includes('$') &&
-                !node.nodeValue.includes('(§') && !node.nodeValue.includes('($') &&
-                !isInsidePriceAndTotal(node.parentElement)) {
+            if (
+                node.nodeValue &&
+                node.nodeValue.includes('$') &&
+                !node.nodeValue.includes('(§') &&
+                !node.nodeValue.includes('($') &&
+                !isInsidePriceAndTotal(node.parentElement)
+            ) {
                 nodesToProcess.push(node);
             }
         }
+
         for (const textNode of nodesToProcess) {
             processTextNodeBadge(textNode);
         }
@@ -274,6 +270,7 @@
         if (!parent) return;
 
         PRICE_REGEX.lastIndex = 0;
+
         let lastIndex = 0;
         let match;
         const fragments = [];
@@ -282,18 +279,24 @@
             if (match.index > lastIndex) {
                 fragments.push(document.createTextNode(text.slice(lastIndex, match.index)));
             }
+
+            // Keep original price text
             fragments.push(document.createTextNode(match[0]));
+
+            // Append USD badge
             const amount = parseTornAmount(match[1], match[2]);
             if (amount != null) {
                 fragments.push(document.createTextNode(' '));
                 fragments.push(createUSDBadge(formatUSD(amount)));
             }
+
             lastIndex = PRICE_REGEX.lastIndex;
         }
 
         if (lastIndex < text.length) {
             fragments.push(document.createTextNode(text.slice(lastIndex)));
         }
+
         if (fragments.length === 0) return;
 
         const frag = document.createDocumentFragment();
@@ -302,15 +305,17 @@
     }
 
     // =========================
-    // DOM PROCESSING — STANDARD MODES (non-destructive on all pages)
+    // DOM PROCESSING — STANDARD MODES (converted/combined/reversed/full/fullreversed/original)
     // =========================
 
     function processElementStandard(el) {
         if (!el || el.dataset.usdConverted === '1') return;
 
+        // STRUCTURED PRICE BLOCK
         if (isPriceAndTotalElement(el)) {
             const priceSpan = el.querySelector('priceAndTotal');
             const totalSpan = el.querySelector('span:titleTotal');
+
             if (!priceSpan) return;
 
             const converted = convertSinglePrice(priceSpan.textContent);
@@ -323,31 +328,42 @@
             let stack = [];
 
             switch (DISPLAY_MODE) {
-                case 'converted': stack = [`${usd} (${total})`]; break;
-                case 'combined': stack = [`${usd} (${torn}) (${total})`]; break;
-                case 'reversed': stack = [`${torn} (${usd}) (${total})`]; break;
-                case 'full': stack = [`${usd} (${price}) (${total})`]; break;
-                case 'fullreversed': stack = [`${price} (${usd}) (${total})`]; break;
-                case 'original': stack = [`${torn} (${total})`]; break;
-                default: stack = [`${price} (${usd}) (${total})`];
+                case 'converted':
+                    stack = [`${usd} (${total})`];
+                    break;
+                case 'combined':
+                    stack = [`${usd} (${torn}) (${total})`];
+                    break;
+                case 'reversed':
+                    stack = [`${torn} (${usd}) (${total})`];
+                    break;
+                case 'full':
+                    stack = [`${usd} (${price}) (${total})`];
+                    break;
+                case 'fullreversed':
+                    stack = [`${price} (${usd}) (${total})`];
+                    break;
+                case 'original':
+                    stack = [`${torn} (${total})`];
+                    break;
+                default:
+                    stack = [`${price} (${usd}) (${total})`];
             }
-
-            // Keep original $ price in hidden span for other scripts
-            hideOriginalPrice(priceSpan, price);
 
             priceSpan.innerHTML = stack.join('<br>');
             el.dataset.usdConverted = '1';
             return;
         }
 
+        // NORMAL PRICE BLOCK
         if (isPriceElement(el)) {
             const converted = convertSinglePrice(el.textContent);
             if (!converted) return;
 
             const torn = converted[0];
             const usd = converted[1];
-            let output;
 
+            let output;
             switch (DISPLAY_MODE) {
                 case 'converted': output = usd; break;
                 case 'combined': output = `${usd} (${torn})`; break;
@@ -357,9 +373,6 @@
                 case 'original': output = torn; break;
                 default: output = `${torn} (${usd})`;
             }
-
-            // Keep original $ price in hidden span for other scripts
-            hideOriginalPrice(el, el.textContent);
 
             el.innerHTML = output;
             el.dataset.usdConverted = '1';
@@ -371,29 +384,27 @@
         if (!text || !text.includes('$')) return;
         if (text.includes('(§') || text.includes('($')) return;
 
-        // Keep original $ price in hidden span for other scripts
-        hideOriginalPrice(el, text);
-
-        el.textContent = getConvertedText(text);
+        el.textContent = convertText(text);
         el.dataset.usdConverted = '1';
     }
 
     function processTextNodeStandard(node) {
-        if (node.nodeType !== Node.TEXT_NODE || !node.nodeValue || isInsidePriceAndTotal(node.parentElement)) return;
+        if (
+            node.nodeType !== Node.TEXT_NODE ||
+            !node.nodeValue ||
+            isInsidePriceAndTotal(node.parentElement)
+        ) return;
+
         if (node.nodeValue.includes('(§') || node.nodeValue.includes('($')) return;
 
-        const parent = node.parentElement;
-        if (!parent) return;
-
-        // Keep original $ price in hidden span for other scripts
-        hideOriginalPrice(parent, parent.textContent);
-
-        node.nodeValue = getConvertedText(node.nodeValue);
+        node.nodeValue = convertText(node.nodeValue);
     }
 
     // =========================
     // SCAN
     // =========================
+
+    const isBadgeMode = DISPLAY_MODE === 'badge';
 
     function scan(root) {
         if (!root) return;
@@ -411,9 +422,15 @@
             }
         }
 
-        // Text node walking (skip in badge mode — handled inside processElementBadge)
+        // Text node walking — only in standard modes
         if (!isBadgeMode) {
-            const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+            const walker = document.createTreeWalker(
+                root,
+                NodeFilter.SHOW_TEXT,
+                null,
+                false
+            );
+
             let node;
             while ((node = walker.nextNode())) {
                 processTextNodeStandard(node);
@@ -425,7 +442,10 @@
     // INIT
     // =========================
 
-    ensureStyles();
+    if (isBadgeMode) {
+        ensureBadgeStyle();
+    }
+
     scan(document.body);
 
     const observer = new MutationObserver((mutations) => {
