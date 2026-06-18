@@ -7,7 +7,6 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_registerMenuCommand
-// @grant        GM_setClipboard
 // @grant        none
 // @license MIT
 // @namespace https://greasyfork.org/users/559205
@@ -37,10 +36,10 @@
     ];
 
     function getMode() {
-        try { return GM_getValue(DISPLAY_MODE_KEY, DEFAULT_MODE); } catch (e) { return localStorage.getItem(DISPLAY_MODE_KEY) || DEFAULT_MODE; }
+        return safeGM.getValue(DISPLAY_MODE_KEY, DEFAULT_MODE);
     }
     function setMode(mode) {
-        try { GM_setValue(DISPLAY_MODE_KEY, mode); } catch (e) { localStorage.setItem(DISPLAY_MODE_KEY, mode); }
+        safeGM.setValue(DISPLAY_MODE_KEY, mode);
         location.reload();
     }
 
@@ -685,17 +684,31 @@
     }
 
     // =========================
-    // TAMPERMONKEY MENU
+    // safeGM — cross-manager GM wrapper
     // =========================
 
-    if (typeof GM_registerMenuCommand !== 'undefined') {
-        // Direct mode switches
-        for (const opt of MODE_OPTIONS) {
-            GM_registerMenuCommand(`USD: ${opt.label}`, () => setMode(opt.value), null);
-        }
-        GM_registerMenuCommand('────────────────', () => {}, null);
-        GM_registerMenuCommand('USD: Settings...', () => openSettings(), null);
+    const safeGM = {
+        getValue: (key, def) => {
+            if (typeof GM_getValue !== 'undefined') return GM_getValue(key, def);
+            return localStorage.getItem(key) ?? def;
+        },
+        setValue: (key, val) => {
+            if (typeof GM_setValue !== 'undefined') GM_setValue(key, val);
+            else localStorage.setItem(key, val);
+        },
+        registerMenuCommand: (label, fn) => {
+            if (typeof GM_registerMenuCommand !== 'undefined') {
+                GM_registerMenuCommand(label, fn);
+            }
+        },
+    };
+
+    // Register mode-switch commands
+    for (const opt of MODE_OPTIONS) {
+        safeGM.registerMenuCommand(`USD: ${opt.label}`, () => setMode(opt.value));
     }
+    safeGM.registerMenuCommand('────────────────', () => {});
+    safeGM.registerMenuCommand('⚙ USD: Settings...', openSettings);
 
     // =========================
     // INIT
