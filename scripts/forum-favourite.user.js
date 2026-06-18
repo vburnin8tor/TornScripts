@@ -18,41 +18,38 @@
     var ORDER_KEY = 'ff_forum_order';
     var POLL_INTERVAL = 250;
     var STAR_COLOR = '#f3da35';
-    var ANIMATE_DURATION = 300; // ms for scrollIntoView
+    var ANIM_MS = 350;
 
     var saved = loadSaved();
-    var customOrder = loadCustomOrder(); // { idxKey: [dataUrl, ...] }
-    var originalPositions = new Map(); // data-href -> original index within its list
+    var customOrder = loadCustomOrder();
+    var originalOrder = new Map(); // data-href -> [dataUrl,...] snapshot per list
     var pollTimer = null;
     var processedLists = [];
     var editMode = false;
-    var dragState = null; // { li, forumList, startY, startIndex, ... }
+    var dragState = null;
 
     GM_addStyle(
-        '.ffStar { padding: 6px; cursor: pointer; display: inline-flex; align-items: center; vertical-align: middle; font-size: 15px; line-height: 1; color: ' + STAR_COLOR + '; }' +
-        '.forum-list { display: flex!important; flex-direction: column; }' +
-        'li[isFav="yes"] { order: -1; }' +
-        '.ff-edit-btn { cursor: pointer; margin-left: 6px; font-size: 13px; color: #888; display: inline-flex; align-items: center; vertical-align: middle; }' +
-        '.ff-edit-btn:hover { color: #ccc; }' +
-        '.ff-drag-handle { cursor: grab; margin-right: 6px; font-size: 14px; color: #666; display: inline-flex; align-items: center; vertical-align: middle; user-select: none; }' +
-        '.ff-drag-handle:active { cursor: grabbing; }' +
-        '.ff-edit-mode .ff-drag-handle { display: inline-flex; }' +
-        '.ff-drag-handle { display: none; }' +
-        '.ff-dragging { opacity: 0.5; outline: 2px dashed #f3da35; }' +
-        '.ff-drag-over { border-top: 2px solid #f3da35; }' +
-        '#ff-edit-toggle { position: fixed; bottom: 12px; right: 12px; z-index: 99999; background: #1a1a1a; color: #f3da35; border: 1px solid #f3da35; padding: 6px 12px; cursor: pointer; font-size: 12px; border-radius: 4px; font-family: monospace; }' +
-        '#ff-edit-toggle:hover { background: #2a2a2a; }' +
-        '#ff-edit-toggle.active { background: #f3da35; color: #1a1a1a; }'
+        '.ffStar{padding:6px;cursor:pointer;display:inline-flex;align-items:center;vertical-align:middle;font-size:15px;line-height:1;color:' + STAR_COLOR + '}' +
+        '.forum-list{display:flex!important;flex-direction:column}' +
+        '.ff-drag-handle{cursor:grab;margin-right:6px;font-size:14px;color:#666;display:none;align-items:center;vertical-align:middle;user-select:none}' +
+        '.ff-drag-handle:active{cursor:grabbing}' +
+        '.ff-edit-mode .ff-drag-handle{display:inline-flex}' +
+        '.ff-dragging{opacity:0.4;outline:2px dashed ' + STAR_COLOR + '}' +
+        '.ff-edit-btn{cursor:pointer;margin-left:8px;font-size:13px;color:#888;display:inline;vertical-align:middle}' +
+        '.ff-edit-btn:hover{color:#f3da35}' +
+        '#ff-edit-toggle{position:fixed;bottom:12px;right:12px;z-index:99999;background:#1a1a1a;color:' + STAR_COLOR + ';border:1px solid ' + STAR_COLOR + ';padding:6px 14px;cursor:pointer;font-size:12px;border-radius:4px;font-family:monospace}' +
+        '#ff-edit-toggle:hover{background:#2a2a2a}'
     );
 
     window.addEventListener('hashchange', onHashChange);
     onHashChange();
 
+    // ─── Polling ───────────────────────────────────────────────
+
     function onHashChange() {
         clearInterval(pollTimer);
         processedLists = [];
-        originalPositions.clear();
-
+        originalOrder.clear();
         var hash = window.location.hash;
         if (!hash || hash === '' || hash.indexOf('/p=main') !== -1 || hash.indexOf('#/p=') !== 0) {
             startPolling();
@@ -61,399 +58,302 @@
 
     function startPolling() {
         pollTimer = setInterval(function() {
-            var forumLists = document.querySelectorAll('.forum-list:not([data-ff-processed])');
-            if (forumLists.length === 0) return;
-
-            var index = processedLists.length;
-            var anyNew = false;
-
-            for (var i = 0; i < forumLists.length; i++) {
-                var forumList = forumLists[i];
-                forumList.setAttribute('data-ff-processed', 'true');
-                anyNew = true;
-
-                if (index === 0) {
-                    processedLists.push(true);
-                    index += 1;
-                    continue;
-                }
-
-                processList(forumList, index);
+            var lists = document.querySelectorAll('.forum-list:not([data-ff-processed])');
+            if (!lists.length) return;
+            var idx = processedLists.length;
+            for (var i = 0; i < lists.length; i++) {
+                lists[i].setAttribute('data-ff-processed', 'true');
+                if (idx === 0) { processedLists.push(true); idx++; continue; }
+                processList(lists[i], idx);
                 processedLists.push(true);
-                index += 1;
+                idx++;
             }
-
-            if (anyNew) {
-                var remaining = document.querySelectorAll('.forum-list:not([data-ff-processed])');
-                if (remaining.length === 0) {
-                    clearInterval(pollTimer);
-                    pollTimer = null;
-                }
+            if (!document.querySelectorAll('.forum-list:not([data-ff-processed])').length) {
+                clearInterval(pollTimer);
+                pollTimer = null;
             }
         }, POLL_INTERVAL);
     }
 
-    function processList(forumList, index) {
-        var idxKey = String(index);
-        var liList = forumList.querySelectorAll('li[data-href^="forums.php?p=forums"]');
+    // ─── Process a forum list ──────────────────────────────────
 
-        // Record original positions before any reordering
-        var lis = [];
-        for (var i = 0; i < liList.length; i++) {
-            var li = liList[i];
-            var dataUrl = li.getAttribute('data-href');
-            if (!originalPositions.has(dataUrl)) {
-                originalPositions.set(dataUrl, { idxKey: idxKey, index: i });
+    function processList(forumList, idx) {
+        var idxKey = String(idx);
+        var items = forumList.querySelectorAll('li[data-href^="forums.php?p=forums"]');
+
+        // Snapshot original DOM order once
+        if (!originalOrder.has(idxKey)) {
+            var snap = [];
+            for (var i = 0; i < items.length; i++) {
+                snap.push(items[i].getAttribute('data-href'));
             }
-            lis.push(li);
+            originalOrder.set(idxKey, snap);
         }
 
-        // Apply custom order if exists
+        // Apply saved custom order
         if (customOrder[idxKey]) {
-            applyCustomOrder(forumList, lis, idxKey);
+            applyCustomOrder(forumList, items, idxKey);
         }
 
-        for (var i = 0; i < liList.length; i++) {
-            var li = liList[i];
-            var dataUrl = li.getAttribute('data-href');
-
+        for (var i = 0; i < items.length; i++) {
+            var li = items[i];
+            var href = li.getAttribute('data-href');
             if (li.querySelector('.ffStar')) continue;
 
-            var span = document.createElement('span');
-            span.className = 'ffStar';
+            var isFav = saved[idxKey] && saved[idxKey].indexOf(href) !== -1;
 
-            var isFav = saved[idxKey] && saved[idxKey].indexOf(dataUrl) !== -1 ? 'yes' : 'no';
-            span.setAttribute('isFav', isFav);
-            span.setAttribute('data-index', idxKey);
-            span.setAttribute('data-href', dataUrl);
-            span.textContent = isFav === 'yes' ? '\u2605' : '\u2606';
-
-            li.setAttribute('isFav', isFav);
-
-            if (isFav === 'yes') {
-                moveLiToTop(li, forumList);
-            }
-
-            span.addEventListener('click', onStarClick);
-
+            // Star
+            var star = document.createElement('span');
+            star.className = 'ffStar';
+            star.textContent = isFav ? '\u2605' : '\u2606';
+            star.setAttribute('data-href', href);
+            star.setAttribute('data-idx', idxKey);
+            star.setAttribute('data-fav', isFav ? '1' : '0');
+            star.addEventListener('click', onStarClick);
             var desc = li.querySelector('.name a .desc');
-            if (desc) {
-                desc.appendChild(span);
-            }
+            if (desc) desc.appendChild(star);
 
-            // Add drag handle (hidden by default, shown in edit mode)
-            var dragHandle = document.createElement('span');
-            dragHandle.className = 'ff-drag-handle';
-            dragHandle.textContent = '\u2630'; // ≡
-            dragHandle.setAttribute('data-href', dataUrl);
-            dragHandle.setAttribute('data-index', idxKey);
-            dragHandle.addEventListener('mousedown', onDragStart);
-            dragHandle.addEventListener('touchstart', onDragStart, { passive: false });
-
+            // Drag handle
+            var handle = document.createElement('span');
+            handle.className = 'ff-drag-handle';
+            handle.textContent = '\u2630';
+            handle.addEventListener('mousedown', onDragStart);
+            handle.addEventListener('touchstart', onDragStart, { passive: false });
             var nameEl = li.querySelector('.name');
-            if (nameEl) {
-                nameEl.insertBefore(dragHandle, nameEl.firstChild);
-            }
+            if (nameEl) nameEl.insertBefore(handle, nameEl.firstChild);
+
+            // Move favs to top immediately (no animation on initial load)
+            if (isFav) forumList.insertBefore(li, forumList.querySelector('li[data-href^="forums.php?p=forums"]'));
         }
 
-        // Add edit button to the list header area
-        if (!forumList.querySelector('.ff-edit-btn')) {
-            var editBtn = document.createElement('span');
-            editBtn.className = 'ff-edit-btn';
-            editBtn.textContent = '\u270E'; // ✎
-            editBtn.title = 'Toggle edit mode for reordering';
-            editBtn.addEventListener('click', function() {
-                toggleEditMode(forumList);
-            });
-            // Try to find a header for this list
-            var prev = forumList.previousElementSibling;
-            if (prev) {
-                prev.style.position = 'relative';
-                prev.appendChild(editBtn);
+        // Edit button — place inside the title <li class="name"> next to heading text
+        var wrap = forumList.closest('.forum-wrap');
+        if (wrap && !wrap.querySelector('.ff-edit-btn')) {
+            var titleName = wrap.querySelector('.title-black .name');
+            if (titleName) {
+                var btn = document.createElement('span');
+                btn.className = 'ff-edit-btn';
+                btn.textContent = ' \u270E';
+                btn.title = 'Toggle drag-reorder mode';
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    toggleEditMode(forumList, btn);
+                });
+                titleName.appendChild(btn);
             }
         }
     }
 
-    function applyCustomOrder(forumList, lis, idxKey) {
+    // ─── Star click → animate ──────────────────────────────────
+
+    function onStarClick(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var star = e.currentTarget;
+        var href = star.getAttribute('data-href');
+        var idxKey = star.getAttribute('data-idx');
+        var wasFav = star.getAttribute('data-fav') === '1';
+
+        // Walk up to the <li>
+        var li = star.parentElement;
+        while (li && li.tagName !== 'LI') li = li.parentElement;
+        if (!li) return;
+        var forumList = li.parentElement;
+
+        if (wasFav) {
+            // Unfavourite
+            star.textContent = '\u2606';
+            star.setAttribute('data-fav', '0');
+            saved[idxKey] = (saved[idxKey] || []).filter(function(h) { return h !== href; });
+            animateToOriginal(li, forumList, href, idxKey);
+        } else {
+            // Favourite
+            star.textContent = '\u2605';
+            star.setAttribute('data-fav', '1');
+            if (!saved[idxKey]) saved[idxKey] = [];
+            saved[idxKey].push(href);
+            animateToTop(li, forumList);
+        }
+        save();
+    }
+
+    function animateToTop(li, forumList) {
+        var target = forumList.querySelector('li[data-href^="forums.php?p=forums"]');
+        if (!target || target === li) return;
+
+        // First: record current visual position
+        var firstRect = li.getBoundingClientRect();
+        var targetRect = target.getBoundingClientRect();
+        var dy = firstRect.top - targetRect.top;
+
+        if (Math.abs(dy) < 3) { forumList.insertBefore(li, target); return; }
+
+        // Last: move in DOM
+        forumList.insertBefore(li, target);
+
+        // Invert: offset visually back to where it was
+        li.style.transition = 'none';
+        li.style.transform = 'translateY(' + dy + 'px)';
+
+        // Play: animate to 0
+        requestAnimationFrame(function() {
+            requestAnimationFrame(function() {
+                li.style.transition = 'transform ' + ANIM_MS + 'ms cubic-bezier(.25,.1,.25,1)';
+                li.style.transform = '';
+                setTimeout(function() {
+                    li.style.transition = '';
+                    li.style.transform = '';
+                }, ANIM_MS);
+            });
+        });
+    }
+
+    function animateToOriginal(li, forumList, href, idxKey) {
+        var snap = originalOrder.get(idxKey);
+        if (!snap) { moveLiToEnd(li, forumList); return; }
+
+        // Find where this href was in the original snapshot
+        var origIdx = snap.indexOf(href);
+        if (origIdx === -1) { moveLiToEnd(li, forumList); return; }
+
+        // Build current list of items (excluding our li)
+        var current = [];
+        var all = forumList.querySelectorAll('li[data-href^="forums.php?p=forums"]');
+        for (var i = 0; i < all.length; i++) {
+            if (all[i] !== li) current.push(all[i]);
+        }
+
+        // Find the element that should be BEFORE us in original order
+        // origIdx=0 means we should be first
+        var insertBefore = null;
+        if (origIdx === 0) {
+            // We should be first
+            if (current.length > 0) insertBefore = current[0];
+        } else {
+            // Find the item at origIdx-1 in original snapshot, then find what's after it
+            var prevHref = snap[origIdx - 1];
+            var foundPrev = false;
+            for (var i = 0; i < current.length; i++) {
+                if (foundPrev) { insertBefore = current[i]; break; }
+                if (current[i].getAttribute('data-href') === prevHref) foundPrev = true;
+            }
+            // If we didn't find anything after prev, we go at end
+        }
+
+        // First: record visual position
+        var firstRect = li.getBoundingClientRect();
+
+        // Last: move in DOM
+        if (insertBefore) {
+            forumList.insertBefore(li, insertBefore);
+        } else {
+            forumList.appendChild(li);
+        }
+
+        // Compute delta
+        var newRect = li.getBoundingClientRect();
+        var dy = firstRect.top - newRect.top;
+
+        if (Math.abs(dy) < 3) return;
+
+        // Invert + play
+        li.style.transition = 'none';
+        li.style.transform = 'translateY(' + dy + 'px)';
+        requestAnimationFrame(function() {
+            requestAnimationFrame(function() {
+                li.style.transition = 'transform ' + ANIM_MS + 'ms cubic-bezier(.25,.1,.25,1)';
+                li.style.transform = '';
+                setTimeout(function() {
+                    li.style.transition = '';
+                    li.style.transform = '';
+                }, ANIM_MS);
+            });
+        });
+    }
+
+    function moveLiToEnd(li, forumList) {
+        if (!forumList) return;
+        var all = forumList.querySelectorAll('li[data-href^="forums.php?p=forums"]');
+        var last = all[all.length - 1];
+        if (last && last !== li) forumList.appendChild(li);
+    }
+
+    // ─── Custom order ──────────────────────────────────────────
+
+    function applyCustomOrder(forumList, items, idxKey) {
         var order = customOrder[idxKey];
         if (!order || !order.length) return;
-
-        // Sort lis according to custom order
-        var ordered = [];
+        var itemArr = [];
+        for (var i = 0; i < items.length; i++) itemArr.push(items[i]);
         var seen = {};
-
-        // First, add items in custom order
+        // Place items in saved order first
         for (var i = 0; i < order.length; i++) {
-            for (var j = 0; j < lis.length; j++) {
-                if (lis[j].getAttribute('data-href') === order[i]) {
-                    ordered.push(lis[j]);
+            for (var j = 0; j < itemArr.length; j++) {
+                if (itemArr[j].getAttribute('data-href') === order[i]) {
+                    forumList.appendChild(itemArr[j]);
                     seen[order[i]] = true;
                     break;
                 }
             }
         }
-
-        // Then add any new items not in custom order
-        for (var i = 0; i < lis.length; i++) {
-            var href = lis[i].getAttribute('data-href');
-            if (!seen[href]) {
-                ordered.push(lis[i]);
-            }
-        }
-
-        // Re-append in order
-        for (var i = 0; i < ordered.length; i++) {
-            forumList.appendChild(ordered[i]);
-        }
-    }
-
-    // ─── Star Click ───────────────────────────────────────────
-
-    function onStarClick(e) {
-        e.preventDefault();
-        e.stopPropagation();
-
-        var span = e.currentTarget;
-        var idx = span.getAttribute('data-index');
-        var href = span.getAttribute('data-href');
-        var wasFav = span.getAttribute('isFav') === 'yes';
-
-        var li = span.parentElement;
-        while (li && li.tagName !== 'LI') li = li.parentElement;
-        var forumList = li ? li.parentElement : null;
-
-        if (wasFav) {
-            span.textContent = '\u2606';
-            span.setAttribute('isFav', 'no');
-            if (li) li.setAttribute('isFav', 'no');
-            saved[idx] = removeFromArray(saved[idx] || [], href);
-
-            // Animate: move back to original position
-            if (li && forumList) {
-                moveLiToOriginalPosition(li, forumList, href);
-            }
-        } else {
-            span.textContent = '\u2605';
-            span.setAttribute('isFav', 'yes');
-            if (li) {
-                li.setAttribute('isFav', 'yes');
-                if (forumList) {
-                    // Animate: move to top
-                    animateMoveToTop(li, forumList);
-                }
-            }
-            if (!saved[idx]) saved[idx] = [];
-            saved[idx].push(href);
-        }
-
-        save();
-    }
-
-    function animateMoveToTop(li, forumList) {
-        // Get the current visual position
-        var liRect = li.getBoundingClientRect();
-        var first = forumList.querySelector('li[data-href^="forums.php?p=forums"]');
-        if (!first || first === li) return;
-
-        var firstRect = first.getBoundingClientRect();
-        var deltaY = liRect.top - firstRect.top;
-
-        // If already at top, skip
-        if (Math.abs(deltaY) < 2) {
-            forumList.insertBefore(li, first);
-            return;
-        }
-
-        // Use FLIP animation: First, Last, Invert, Play
-        // First: current position (already captured above)
-
-        // Last: move to DOM position
-        forumList.insertBefore(li, first);
-
-        // Invert: transform back to old visual position
-        var newRect = li.getBoundingClientRect();
-        var invertY = deltaY;
-
-        li.style.transition = 'none';
-        li.style.transform = 'translateY(' + invertY + 'px)';
-
-        // Play: animate to final position
-        requestAnimationFrame(function() {
-            requestAnimationFrame(function() {
-                li.style.transition = 'transform ' + ANIMATE_DURATION + 'ms ease-out';
-                li.style.transform = 'translateY(0)';
-                setTimeout(function() {
-                    li.style.transition = '';
-                    li.style.transform = '';
-                }, ANIMATE_DURATION);
-            });
-        });
-    }
-
-    function moveLiToOriginalPosition(li, forumList, href) {
-        var orig = originalPositions.get(href);
-        if (!orig || orig.idxKey !== getForumListIndex(forumList)) {
-            moveLiToEnd(li, forumList);
-            return;
-        }
-
-        // Find the element that should be just before this one in original order
-        var lis = forumList.querySelectorAll('li[data-href^="forums.php?p=forums"]');
-        var targetLi = null;
-
-        // The element at original index should be the one before our insertion point
-        if (orig.index >= lis.length) {
-            // Should go at end
-            var lastLi = null;
-            for (var i = 0; i < lis.length; i++) {
-                if (lis[i] !== li) lastLi = lis[i];
-            }
-            if (lastLi && lastLi !== li) {
-                forumList.insertBefore(li, lastLi.nextSibling);
-            }
-        } else {
-            // Find what element is currently at position orig.index
-            var allItems = [];
-            for (var i = 0; i < lis.length; i++) {
-                allItems.push(lis[i]);
-            }
-
-            // We want to insert at original position, but accounting for ourselves being removed
-            var insertBeforeEl = null;
-            var count = 0;
-            for (var i = 0; i < allItems.length; i++) {
-                if (allItems[i] === li) continue;
-                if (count === orig.index) {
-                    insertBeforeEl = allItems[i];
-                    break;
-                }
-                count++;
-            }
-
-            if (insertBeforeEl) {
-                // FLIP animation
-                var liRect = li.getBoundingClientRect();
-                var targetRect = insertBeforeEl.getBoundingClientRect();
-                var deltaY = liRect.top - targetRect.top;
-
-                forumList.insertBefore(li, insertBeforeEl);
-
-                var newRect = li.getBoundingClientRect();
-                var invertDelta = deltaY;
-
-                li.style.transition = 'none';
-                li.style.transform = 'translateY(' + invertDelta + 'px)';
-
-                requestAnimationFrame(function() {
-                    requestAnimationFrame(function() {
-                        li.style.transition = 'transform ' + ANIMATE_DURATION + 'ms ease-out';
-                        li.style.transform = 'translateY(0)';
-                        setTimeout(function() {
-                            li.style.transition = '';
-                            li.style.transform = '';
-                        }, ANIMATE_DURATION);
-                    });
-                });
+        // Append any new items not in saved order
+        for (var i = 0; i < itemArr.length; i++) {
+            if (!seen[itemArr[i].getAttribute('data-href')]) {
+                forumList.appendChild(itemArr[i]);
             }
         }
     }
 
-    function moveLiToEnd(li, forumList) {
-        if (!forumList) return;
-        var allLis = forumList.querySelectorAll('li[data-href^="forums.php?p=forums"]');
-        var last = null;
-        for (var i = 0; i < allLis.length; i++) last = allLis[i];
-        if (last && last !== li && last.nextSibling) {
-            forumList.insertBefore(li, last.nextSibling);
-        } else if (last && last !== li) {
-            forumList.appendChild(li);
-        }
-    }
+    // ─── Drag & drop ───────────────────────────────────────────
 
-    function moveLiToTop(li, forumList) {
-        if (!forumList) return;
-        var first = forumList.querySelector('li[data-href^="forums.php?p=forums"]');
-        if (first && first !== li) forumList.insertBefore(li, first);
-    }
-
-    function getForumListIndex(forumList) {
-        var lists = document.querySelectorAll('.forum-list');
-        for (var i = 0; i < lists.length; i++) {
-            if (lists[i] === forumList) return String(Math.max(0, i - 1));
-        }
-        return '0';
-    }
-
-    // ─── Drag & Drop Reorder ───────────────────────────────────
-
-    function toggleEditMode(forumList) {
+    function toggleEditMode(forumList, btn) {
         editMode = !editMode;
-        var btn = forumList.querySelector('.ff-edit-btn');
         if (editMode) {
             forumList.classList.add('ff-edit-mode');
-            if (btn) {
-                btn.textContent = '\u2714'; // ✔
-                btn.title = 'Save and exit edit mode';
-            }
-            showEditToggle(true);
+            btn.textContent = ' \u2714';
+            btn.title = 'Save & exit edit mode';
+            showGlobalToggle(true);
         } else {
             forumList.classList.remove('ff-edit-mode');
-            if (btn) {
-                btn.textContent = '\u270E'; // ✎
-                btn.title = 'Toggle edit mode for reordering';
-            }
-            saveCustomOrder(forumList);
-            showEditToggle(false);
+            btn.textContent = ' \u270E';
+            btn.title = 'Toggle drag-reorder mode';
+            saveCustomOrderForList(forumList);
+            showGlobalToggle(false);
         }
     }
 
-    function showEditToggle(active) {
-        var existing = document.getElementById('ff-edit-toggle');
-        if (existing) existing.remove();
-
-        if (!active) return;
-
-        var toggle = document.createElement('button');
-        toggle.id = 'ff-edit-toggle';
-        toggle.textContent = '✎ Edit Mode: ON';
-        toggle.className = 'active';
-        toggle.addEventListener('click', function() {
-            // Find all forum lists and exit edit mode
+    function showGlobalToggle(on) {
+        var el = document.getElementById('ff-edit-toggle');
+        if (el) el.remove();
+        if (!on) return;
+        var btn = document.createElement('button');
+        btn.id = 'ff-edit-toggle';
+        btn.textContent = '\u270E  Edit Mode: ON  \u2714';
+        btn.addEventListener('click', function() {
             var lists = document.querySelectorAll('.forum-list.ff-edit-mode');
             for (var i = 0; i < lists.length; i++) {
-                toggleEditMode(lists[i]);
+                var b = lists[i].closest('.forum-wrap').querySelector('.ff-edit-btn');
+                if (b) toggleEditMode(lists[i], b);
             }
         });
-        document.body.appendChild(toggle);
+        document.body.appendChild(btn);
     }
 
     function onDragStart(e) {
         if (!editMode) return;
         e.preventDefault();
         e.stopPropagation();
-
         var handle = e.currentTarget;
         var li = handle.parentElement;
         while (li && li.tagName !== 'LI') li = li.parentElement;
         if (!li) return;
-
         var forumList = li.parentElement;
-        var lis = forumList.querySelectorAll('li[data-href^="forums.php?p=forums"]');
-        var startIndex = -1;
-        for (var i = 0; i < lis.length; i++) {
-            if (lis[i] === li) { startIndex = i; break; }
-        }
-
         dragState = {
             li: li,
             forumList: forumList,
-            startIndex: startIndex,
-            startY: e.type === 'touchstart' ? e.touches[0].clientY : e.clientY,
-            currentIndex: startIndex
+            startY: e.type === 'touchstart' ? e.touches[0].clientY : e.clientY
         };
-
         li.classList.add('ff-dragging');
-
         document.addEventListener('mousemove', onDragMove);
         document.addEventListener('mouseup', onDragEnd);
         document.addEventListener('touchmove', onDragMove, { passive: false });
@@ -463,46 +363,24 @@
     function onDragMove(e) {
         if (!dragState) return;
         e.preventDefault();
-
-        var clientY = e.type === 'touchmove' ? e.touches[0].clientY : e.clientY;
-        var forumList = dragState.forumList;
-        var lis = forumList.querySelectorAll('li[data-href^="forums.php?p=forums"]');
-
-        // Find which item we're hovering over
-        var hoverIndex = -1;
-        for (var i = 0; i < lis.length; i++) {
-            if (lis[i] === dragState.li) continue;
-            var rect = lis[i].getBoundingClientRect();
-            var midY = rect.top + rect.height / 2;
-            if (clientY < midY) {
-                hoverIndex = i;
-                break;
+        var y = e.type === 'touchmove' ? e.touches[0].clientY : e.clientY;
+        var fl = dragState.forumList;
+        var items = fl.querySelectorAll('li[data-href^="forums.php?p=forums"]');
+        for (var i = 0; i < items.length; i++) {
+            if (items[i] === dragState.li) continue;
+            var rect = items[i].getBoundingClientRect();
+            if (y < rect.top + rect.height / 2) {
+                fl.insertBefore(dragState.li, items[i]);
+                return;
             }
-            hoverIndex = i + 1;
         }
-
-        // Clamp
-        if (hoverIndex < 0) hoverIndex = 0;
-        if (hoverIndex > lis.length - 1) hoverIndex = lis.length - 1;
-
-        if (hoverIndex !== dragState.currentIndex) {
-            // Move the dragged element
-            var targetLi = lis[hoverIndex];
-            if (targetLi && targetLi !== dragState.li) {
-                forumList.insertBefore(dragState.li, targetLi);
-            } else if (hoverIndex >= lis.length - 1) {
-                forumList.appendChild(dragState.li);
-            }
-            dragState.currentIndex = hoverIndex;
-        }
+        fl.appendChild(dragState.li);
     }
 
-    function onDragEnd(e) {
+    function onDragEnd() {
         if (!dragState) return;
-
         dragState.li.classList.remove('ff-dragging');
-        saveCustomOrder(dragState.forumList);
-
+        saveCustomOrderForList(dragState.forumList);
         dragState = null;
         document.removeEventListener('mousemove', onDragMove);
         document.removeEventListener('mouseup', onDragEnd);
@@ -510,15 +388,18 @@
         document.removeEventListener('touchend', onDragEnd);
     }
 
-    function saveCustomOrder(forumList) {
-        var idxKey = getForumListIndex(forumList);
-        var lis = forumList.querySelectorAll('li[data-href^="forums.php?p=forums"]');
-        var order = [];
-        for (var i = 0; i < lis.length; i++) {
-            order.push(lis[i].getAttribute('data-href'));
+    function saveCustomOrderForList(forumList) {
+        // Find idxKey for this list
+        var lists = document.querySelectorAll('.forum-list');
+        var idx = '0';
+        for (var i = 0; i < lists.length; i++) {
+            if (lists[i] === forumList) { idx = String(Math.max(0, i - 1)); break; }
         }
-        customOrder[idxKey] = order;
-        saveOrder();
+        var items = forumList.querySelectorAll('li[data-href^="forums.php?p=forums"]');
+        var order = [];
+        for (var i = 0; i < items.length; i++) order.push(items[i].getAttribute('data-href'));
+        customOrder[idx] = order;
+        GM_setValue(ORDER_KEY, JSON.stringify(customOrder));
     }
 
     // ─── Storage ───────────────────────────────────────────────
@@ -526,16 +407,9 @@
     function loadSaved() {
         try {
             var raw = GM_getValue(STORAGE_KEY);
-            if (raw) {
-                var parsed = JSON.parse(raw);
-                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-                    return parsed;
-                }
-            }
-        } catch (e) {
-            console.warn('[ForumFav] Failed to load saved data, resetting.');
-        }
-        return { '0': [], '1': [], '2': [], '3': [] };
+            if (raw) { var p = JSON.parse(raw); if (p && typeof p === 'object' && !Array.isArray(p)) return p; }
+        } catch(e) {}
+        return {};
     }
 
     function save() {
@@ -545,29 +419,8 @@
     function loadCustomOrder() {
         try {
             var raw = GM_getValue(ORDER_KEY);
-            if (raw) {
-                var parsed = JSON.parse(raw);
-                if (parsed && typeof parsed === 'object') {
-                    return parsed;
-                }
-            }
-        } catch (e) {
-            console.warn('[ForumFav] Failed to load custom order, resetting.');
-        }
+            if (raw) { var p = JSON.parse(raw); if (p && typeof p === 'object') return p; }
+        } catch(e) {}
         return {};
-    }
-
-    function saveOrder() {
-        GM_setValue(ORDER_KEY, JSON.stringify(customOrder));
-    }
-
-    function removeFromArray(arr, item) {
-        var result = [];
-        for (var i = 0; i < arr.length; i++) {
-            if (arr[i] !== item) {
-                result.push(arr[i]);
-            }
-        }
-        return result;
     }
 })();
