@@ -1,12 +1,14 @@
 // ==UserScript==
 // @name         Torn USD Converter
 // @author       shaul [3908280]
-// @version      1.8
+// @version      1.9
 // @description  Convert Torn cash displays to USD equivalents
 // @match        https://www.torn.com/*
 // @grant        none
 // @license MIT
 // @namespace https://greasyfork.org/users/559205
+// @downloadURL https://update.greasyfork.org/scripts/582336/Torn%20USD%20Converter.user.js
+// @updateURL https://update.greasyfork.org/scripts/582336/Torn%20USD%20Converter.meta.js
 // ==/UserScript==
 
 (function () {
@@ -16,17 +18,17 @@
     // CONFIG
     // =========================
     const DISPLAY_MODE = "fullreversed";
-	// OPTIONS :
-        // "converted"    -> $5.00
-        // "combined"     -> $5.00 (§23.5M) (abbreviation starts at $0.02)
-        // "reversed"     -> §23.5M ($5.00)
-        // "full"         -> $5.00 (§23,500,001)
-		// "fullreversed" -> §23,500,001 ($5.00)
-        // "original"     -> §23.5M
+    // OPTIONS :
+    //   "converted"    -> $5.00
+    //   "combined"     -> $5.00 (§23.5M) (abbreviation starts at $0.02/94000)
+    //   "reversed"     -> §23.5M ($5.00)
+    //   "full"         -> $5.00 (§23,500,001)
+    //   "fullreversed" -> §23,500,001 ($5.00)
+    //   "original"     -> §23.5M
 
     const USD_PER_TORN = 5 / 23500000;
 
-    const PRICE_REGEX = /\$([\d,.]+)([kMBT]|mil|bil| mil| bil)?/g;
+    const PRICE_REGEX = /\$([\d,.]+)\s*(k|m|b|t|mil|mill|bil|bn|tril)?/gi;
     const SIMPLE_PRICE_REGEX = /\$([\d,.]+)/;
 
     const PRICE_SELECTOR =
@@ -74,12 +76,16 @@
         if (Number.isNaN(amount)) return null;
 
         switch ((suffix || '').trim()) {
+            case 'K':
             case 'k': amount *= 1e3; break;
             case 'M':
+            case 'm':
             case 'mil': amount *= 1e6; break;
             case 'B':
+            case 'b':
             case 'bil': amount *= 1e9; break;
-            case 'T': amount *= 1e12; break;
+            case 'T':
+            case 't': amount *= 1e12; break;
         }
 
         return amount;
@@ -150,119 +156,120 @@
     // =========================
 
     function processElement(el) {
-    if (!el || el.dataset.usdConverted === '1') return;
+        if (!el || el.dataset.usdConverted === '1') return;
 
-    // =========================
-    // STRUCTURED PRICE BLOCK
-    // =========================
-    if (isPriceAndTotalElement(el)) {
-        const priceSpan = el.querySelector('priceAndTotal');
-        const totalSpan = el.querySelector('span:titleTotal');
+        // =========================
+        // STRUCTURED PRICE BLOCK
+        // =========================
+        if (isPriceAndTotalElement(el)) {
+            const priceSpan = el.querySelector('priceAndTotal');
+            const totalSpan = el.querySelector('span:titleTotal');
 
-        if (!priceSpan) return;
+            if (!priceSpan) return;
 
-        const converted = convertSinglePrice(priceSpan.textContent);
-        if (!converted) return;
+            const converted = convertSinglePrice(priceSpan.textContent);
+            if (!converted) return;
 
-        const torn = converted[0];
-        const usd = converted[1];
-        const price = priceSpan.textContent;
-        const total = totalSpan.textContent;
-        let stack = [];
+            const torn = converted[0];
+            const usd = converted[1];
+            const price = priceSpan.textContent;
+            const total = totalSpan.textContent;
+            let stack = [];
 
-        switch (DISPLAY_MODE) {
+            switch (DISPLAY_MODE) {
 
-            case 'converted':
-                stack = [`${usd} (${total})`];
-                break;
+                case 'converted':
+                    stack = [`${usd} (${total})`];
+                    break;
 
-            case 'combined':
-                stack = [`${usd} (${torn}) (${total})` ];
-                break;
+                case 'combined':
+                    stack = [`${usd} (${torn}) (${total})`];
+                    break;
 
-            case 'reversed':
-                stack = [`${torn} (${usd}) (${total})`];
-                break;
+                case 'reversed':
+                    stack = [`${torn} (${usd}) (${total})`];
+                    break;
 
-            case 'full':
-                stack = [`${usd} (${price}) (${totalSpan})`];
-                break;
+                case 'full':
+                    stack = [`${usd} (${price}) (${total})`];
+                    break;
 
-            case 'fullreversed':
-                stack = [`${price} (${usd}) (${totalSpan})`];
-                break;
+                case 'fullreversed':
+                    stack = [`${price} (${usd}) (${total})`];
+                    break;
 
-            case 'original':
-                stack = ['${torn} (${totalspan})'];
-                break;
+                case 'original':
+                    stack = [`${torn} (${total})`];
+                    break;
 
-            default:
-                stack = [`${price} (${usd}) (${totalSpan})`];
+                default:
+                    stack = [`${price} (${usd}) (${total})`];
+            }
+
+            // rebuild ONLY price span
+            priceSpan.innerHTML = stack.join('<br>');
+
+            el.dataset.usdConverted = '1';
+            return;
         }
 
-        // rebuild ONLY price span
-        priceSpan.innerHTML = stack.join('<br>');
+        // =========================
+        // NORMAL PRICE BLOCK
+        // =========================
+        if (isPriceElement(el)) {
+            const converted = convertSinglePrice(el.textContent);
+            if (!converted) return;
 
-        el.dataset.usdConverted = '1';
-        return;
-    }
+            const torn = converted[0];
+            const usd = converted[1];
 
-    // =========================
-    // NORMAL PRICE BLOCK
-    // =========================
-    if (isPriceElement(el)) {
-        const converted = convertSinglePrice(el.textContent);
-        if (!converted) return;
+            let output;
 
-        const torn = converted[0];
-        const usd = converted[1];
+            switch (DISPLAY_MODE) {
+                case 'converted':
+                    output = usd;
+                    break;
 
-        let output;
+                case 'combined':
+                    output = `${usd} (${torn})`;
+                    break;
 
-        switch (DISPLAY_MODE) {
-            case 'converted':
-                output = usd;
-                break;
+                case 'reversed':
+                    output = `${torn} (${usd})`;
+                    break;
 
-            case 'combined':
-                output = `${usd} (${torn})`;
-                break;
+                case 'full':
+                    output = `${usd} (${torn})`;
+                    break;
 
-            case 'reversed':
-                output = `${torn} (${usd})`;
-                break;
+                case 'fullreversed':
+                    output = `${torn} (${usd})`;
+                    break;
 
-            case 'full':
-                output = `${usd} (${torn})`;
-                break;
+                case 'original':
+                    output = torn;
+                    break;
 
-            case 'fullreversed':
-                output = `${torn} (${usd})`;
-                break;
+                default:
+                    output = `${torn} (${usd})`;
+            }
 
-            case 'original':
-                output = torn;
-                break;
-
-            default:
-                output = `${torn} (${usd})`;
+            el.innerHTML = output;
+            el.dataset.usdConverted = '1';
+            return;
         }
 
-        el.innerHTML = output;
+        // =========================
+        // FALLBACK TEXT
+        // =========================
+        const text = el.textContent;
+        if (!text || !text.includes('$')) return;
+        if (text.includes('(§') || text.includes('($')) return;
+
+        el.textContent = convertText(text);
         el.dataset.usdConverted = '1';
-        return;
     }
 
-    // =========================
-    // FALLBACK TEXT
-    // =========================
-    const text = el.textContent;
-    if (!text || !text.includes('$')) return;
-    if (text.includes('(§') || text.includes('($')) return;
-
-    el.textContent = convertText(text);
-    el.dataset.usdConverted = '1';
-}
     function processTextNode(node) {
         if (
             node.nodeType !== Node.TEXT_NODE ||
