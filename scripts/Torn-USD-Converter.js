@@ -233,9 +233,12 @@
         }
 
         // FALLBACK TEXT — walk text nodes and append badges
+        // skip cells with pipe separators (multi-column layout)
+        if (el.children.length > 0) return;
         const text = el.textContent;
         if (!text || !text.includes('$')) return;
         if (text.includes('(§') || text.includes('($')) return;
+        if (text.includes('|')) return;
 
         processTextNodesBadge(el);
         el.dataset.usdConverted = '1';
@@ -379,10 +382,13 @@
             return;
         }
 
-        // FALLBACK TEXT
+        // FALLBACK TEXT — only process leaf-like elements (no child elements)
+        // skip cells with pipe separators (multi-column layout)
+        if (el.children.length > 0) return;
         const text = el.textContent;
         if (!text || !text.includes('$')) return;
         if (text.includes('(§') || text.includes('($')) return;
+        if (text.includes('|')) return;
 
         el.textContent = convertText(text);
         el.dataset.usdConverted = '1';
