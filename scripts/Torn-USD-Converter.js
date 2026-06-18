@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn USD Converter
 // @author       shaul [3908280]
-// @version      1.9.2
+// @version      1.9.3
 // @description  Convert Torn cash displays to USD equivalents
 // @match        https://www.torn.com/*
 // @grant        GM_setValue
@@ -619,7 +619,7 @@
                 <button class="usd-btn" id="${SETTINGS_ID}-reset">Reset to default</button>
                 <button class="usd-btn primary" id="${SETTINGS_ID}-apply">Apply &amp; reload</button>
             </div>
-            <div class="usd-status">Mode: <span class="usd-ok" id="${SETTINGS_ID}-cur-mode"></span></div>
+            <div class="usd-status">v1.9.3 · Mode: <span class="usd-ok" id="${SETTINGS_ID}-cur-mode"></span></div>
         `;
 
         backdrop.appendChild(panel);
