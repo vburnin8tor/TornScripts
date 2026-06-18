@@ -38,7 +38,8 @@
         '.ff-edit-btn{cursor:pointer;margin-left:8px;font-size:13px;color:#888;display:inline;vertical-align:middle}' +
         '.ff-edit-btn:hover{color:#f3da35}' +
         '#ff-edit-toggle{position:fixed;bottom:12px;right:12px;z-index:99999;background:#1a1a1a;color:' + STAR_COLOR + ';border:1px solid ' + STAR_COLOR + ';padding:6px 14px;cursor:pointer;font-size:12px;border-radius:4px;font-family:monospace}' +
-        '#ff-edit-toggle:hover{background:#2a2a2a}'
+        '#ff-edit-toggle:hover{background:#2a2a2a}' +
+        '.ff-animating{transition:transform ' + ANIM_MS + 'ms cubic-bezier(.25,.1,.25,1)}'
     );
 
     window.addEventListener('hashchange', onHashChange);
@@ -123,7 +124,12 @@
             if (nameEl) nameEl.insertBefore(handle, nameEl.firstChild);
 
             // Move favs to top immediately (no animation on initial load)
-            if (isFav) forumList.insertBefore(li, forumList.querySelector('li[data-href^="forums.php?p=forums"]'));
+            if (isFav) {
+                var target = forumList.querySelector('li[data-href^="forums.php?p=forums"]');
+                if (target && target !== li) {
+                    forumList.insertBefore(li, target);
+                }
+            }
         }
 
         // Edit button — place inside the title <li class="name"> next to heading text
@@ -195,80 +201,64 @@
         li.style.transition = 'none';
         li.style.transform = 'translateY(' + dy + 'px)';
 
-        // Play: animate to 0
-        requestAnimationFrame(function() {
-            requestAnimationFrame(function() {
-                li.style.transition = 'transform ' + ANIM_MS + 'ms cubic-bezier(.25,.1,.25,1)';
-                li.style.transform = '';
-                setTimeout(function() {
-                    li.style.transition = '';
-                    li.style.transform = '';
-                }, ANIM_MS);
-            });
-        });
+        // Force reflow
+        li.offsetHeight;
+
+        // Play: animate to 0 using CSS class
+        li.classList.add('ff-animating');
+        li.style.transform = '';
+        setTimeout(function() {
+            li.classList.remove('ff-animating');
+            li.style.transform = '';
+            li.style.transition = '';
+        }, ANIM_MS);
     }
 
     function animateToOriginal(li, forumList, href, idxKey) {
         var snap = originalOrder.get(idxKey);
         if (!snap) { moveLiToEnd(li, forumList); return; }
 
-        // Find where this href was in the original snapshot
         var origIdx = snap.indexOf(href);
         if (origIdx === -1) { moveLiToEnd(li, forumList); return; }
 
-        // Build current list of items (excluding our li)
         var current = [];
         var all = forumList.querySelectorAll('li[data-href^="forums.php?p=forums"]');
         for (var i = 0; i < all.length; i++) {
             if (all[i] !== li) current.push(all[i]);
         }
 
-        // Find the element that should be BEFORE us in original order
-        // origIdx=0 means we should be first
         var insertBefore = null;
         if (origIdx === 0) {
-            // We should be first
             if (current.length > 0) insertBefore = current[0];
         } else {
-            // Find the item at origIdx-1 in original snapshot, then find what's after it
             var prevHref = snap[origIdx - 1];
             var foundPrev = false;
             for (var i = 0; i < current.length; i++) {
                 if (foundPrev) { insertBefore = current[i]; break; }
                 if (current[i].getAttribute('data-href') === prevHref) foundPrev = true;
             }
-            // If we didn't find anything after prev, we go at end
         }
 
-        // First: record visual position
         var firstRect = li.getBoundingClientRect();
-
-        // Last: move in DOM
         if (insertBefore) {
             forumList.insertBefore(li, insertBefore);
         } else {
             forumList.appendChild(li);
         }
-
-        // Compute delta
         var newRect = li.getBoundingClientRect();
         var dy = firstRect.top - newRect.top;
-
         if (Math.abs(dy) < 3) return;
 
-        // Invert + play
         li.style.transition = 'none';
         li.style.transform = 'translateY(' + dy + 'px)';
-        requestAnimationFrame(function() {
-            requestAnimationFrame(function() {
-                li.style.transition = 'transform ' + ANIM_MS + 'ms cubic-bezier(.25,.1,.25,1)';
-                li.style.transform = '';
-                setTimeout(function() {
-                    li.style.transition = '';
-                    li.style.transform = '';
-                }, ANIM_MS);
-            });
-        });
+        li.offsetHeight;
+        li.classList.add('ff-animating');
+        li.style.transform = '';
+        setTimeout(function() {
+            li.classList.remove('ff-animating');
+            li.style.transform = '';
+            li.style.transition = '';
+        }, ANIM_MS);
     }
 
     function moveLiToEnd(li, forumList) {
