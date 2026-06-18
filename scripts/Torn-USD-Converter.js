@@ -29,7 +29,7 @@
 
     const USD_PER_TORN = 5 / 23500000;
 
-    const PRICE_REGEX = /\$([\d,.]+)\s*(k|m|b|t|mil|mill|bil|bn|tril)?/gi;
+    const PRICE_REGEX = /\$([\d,.]+)\s*(mil|mill|bil|bn|tril|k|m|b|t)?/gi;
     const SIMPLE_PRICE_REGEX = /\$([\d,.]+)/;
 
     const PRICE_SELECTOR =
