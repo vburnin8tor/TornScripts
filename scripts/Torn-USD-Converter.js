@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn USD Converter
 // @author       shaul [3908280]
-// @version      1.9.1
+// @version      1.9.2
 // @description  Convert Torn cash displays to USD equivalents
 // @match        https://www.torn.com/*
 // @grant        none
