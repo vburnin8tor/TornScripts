@@ -25,10 +25,7 @@
     //   "full"         -> $5.00 (§23,500,001)
     //   "fullreversed" -> §23,500,001 ($5.00)
     //   "original"     -> §23.5M
-
-    // SAFETY MODE: "append" = add USD as a <span> next to the original price (default, safe for other scripts)
-    //              "replace" = old behavior, replaces text in-place (breaks other scripts that read $ prices)
-    const SAFETY_MODE = "append";
+    //   "badge"        -> §23.5M $5.00  (original price + small green USD badge appended)
 
     const USD_PER_TORN = 5 / 23500000;
 
@@ -39,7 +36,7 @@
         'span[class*="displayPrice"], div[class*="price"], div[class*="priceandTotal"]';
 
     // =========================
-    // USD BADGE STYLING
+    // BADGE STYLING (for "badge" mode only)
     // =========================
     const BADGE_CLASS = "usd-converter-badge";
 
@@ -127,18 +124,7 @@
     }
 
     // =========================
-    // USD BADGE CREATION
-    // =========================
-
-    function createUSDBadge(usdText) {
-        const span = document.createElement("span");
-        span.className = BADGE_CLASS;
-        span.textContent = usdText;
-        return span;
-    }
-
-    // =========================
-    // TEXT CONVERSION (replace mode — old behavior)
+    // TEXT CONVERSION (for non-badge modes)
     // =========================
 
     function convertText(text) {
@@ -172,6 +158,27 @@
     }
 
     // =========================
+    // BADGE CREATION (for "badge" mode)
+    // =========================
+
+    function createUSDBadge(usdText) {
+        const span = document.createElement("span");
+        span.className = BADGE_CLASS;
+        span.textContent = usdText;
+        return span;
+    }
+
+    function hasBadge(el) {
+        return el.querySelector(`.${BADGE_CLASS}`) !== null;
+    }
+
+    function appendBadgeToElement(el, usdText) {
+        if (hasBadge(el)) return;
+        el.appendChild(document.createTextNode(' '));
+        el.appendChild(createUSDBadge(usdText));
+    }
+
+    // =========================
     // STRUCTURE GUARDS
     // =========================
 
@@ -191,26 +198,14 @@
         return el.tagName === 'DIV' && el.className.includes('priceandTotal');
     }
 
-    function hasBadge(el) {
-        return el.querySelector(`.${BADGE_CLASS}`) !== null;
-    }
-
     // =========================
-    // DOM PROCESSING — APPEND MODE (safe)
+    // DOM PROCESSING — BADGE MODE
     // =========================
 
-    function appendBadgeToElement(el, usdText) {
-        if (hasBadge(el)) return;
-        el.appendChild(document.createTextNode(' '));
-        el.appendChild(createUSDBadge(usdText));
-    }
-
-    function processElementAppend(el) {
+    function processElementBadge(el) {
         if (!el || el.dataset.usdConverted === '1') return;
 
-        // =========================
         // STRUCTURED PRICE BLOCK
-        // =========================
         if (isPriceAndTotalElement(el)) {
             const priceSpan = el.querySelector('priceAndTotal');
             if (!priceSpan) return;
@@ -225,9 +220,7 @@
             return;
         }
 
-        // =========================
         // NORMAL PRICE BLOCK
-        // =========================
         if (isPriceElement(el)) {
             const converted = convertSinglePrice(el.textContent);
             if (!converted) return;
@@ -239,44 +232,43 @@
             return;
         }
 
-        // =========================
-        // FALLBACK TEXT
-        // =========================
+        // FALLBACK TEXT — walk text nodes and append badges
         const text = el.textContent;
         if (!text || !text.includes('$')) return;
         if (text.includes('(§') || text.includes('($')) return;
 
-        // For fallback, we still need to walk text nodes
-        // but we'll append badges instead of replacing
-        processElementTextNodesAppend(el);
+        processTextNodesBadge(el);
         el.dataset.usdConverted = '1';
     }
 
-    function processElementTextNodesAppend(el) {
+    function processTextNodesBadge(el) {
         const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null, false);
         const nodesToProcess = [];
         let node;
         while ((node = walker.nextNode())) {
-            if (node.nodeValue && node.nodeValue.includes('$') &&
-                !node.nodeValue.includes('(§') && !node.nodeValue.includes('($') &&
-                !isInsidePriceAndTotal(node.parentElement)) {
+            if (
+                node.nodeValue &&
+                node.nodeValue.includes('$') &&
+                !node.nodeValue.includes('(§') &&
+                !node.nodeValue.includes('($') &&
+                !isInsidePriceAndTotal(node.parentElement)
+            ) {
                 nodesToProcess.push(node);
             }
         }
 
         for (const textNode of nodesToProcess) {
-            processTextNodeAppend(textNode);
+            processTextNodeBadge(textNode);
         }
     }
 
-    function processTextNodeAppend(node) {
+    function processTextNodeBadge(node) {
         if (!node.nodeValue) return;
 
         const text = node.nodeValue;
         const parent = node.parentElement;
         if (!parent) return;
 
-        // Reset regex
         PRICE_REGEX.lastIndex = 0;
 
         let lastIndex = 0;
@@ -284,15 +276,14 @@
         const fragments = [];
 
         while ((match = PRICE_REGEX.exec(text)) !== null) {
-            // Text before match
             if (match.index > lastIndex) {
                 fragments.push(document.createTextNode(text.slice(lastIndex, match.index)));
             }
 
-            // Original price text (keep it!)
+            // Keep original price text
             fragments.push(document.createTextNode(match[0]));
 
-            // USD badge
+            // Append USD badge
             const amount = parseTornAmount(match[1], match[2]);
             if (amount != null) {
                 fragments.push(document.createTextNode(' '));
@@ -302,7 +293,6 @@
             lastIndex = PRICE_REGEX.lastIndex;
         }
 
-        // Remaining text
         if (lastIndex < text.length) {
             fragments.push(document.createTextNode(text.slice(lastIndex)));
         }
@@ -315,12 +305,13 @@
     }
 
     // =========================
-    // DOM PROCESSING — REPLACE mode (old behavior)
+    // DOM PROCESSING — STANDARD MODES (converted/combined/reversed/full/fullreversed/original)
     // =========================
 
-    function processElementReplace(el) {
+    function processElementStandard(el) {
         if (!el || el.dataset.usdConverted === '1') return;
 
+        // STRUCTURED PRICE BLOCK
         if (isPriceAndTotalElement(el)) {
             const priceSpan = el.querySelector('priceAndTotal');
             const totalSpan = el.querySelector('span:titleTotal');
@@ -364,6 +355,7 @@
             return;
         }
 
+        // NORMAL PRICE BLOCK
         if (isPriceElement(el)) {
             const converted = convertSinglePrice(el.textContent);
             if (!converted) return;
@@ -387,6 +379,7 @@
             return;
         }
 
+        // FALLBACK TEXT
         const text = el.textContent;
         if (!text || !text.includes('$')) return;
         if (text.includes('(§') || text.includes('($')) return;
@@ -395,7 +388,7 @@
         el.dataset.usdConverted = '1';
     }
 
-    function processTextNodeReplace(node) {
+    function processTextNodeStandard(node) {
         if (
             node.nodeType !== Node.TEXT_NODE ||
             !node.nodeValue ||
@@ -411,6 +404,8 @@
     // SCAN
     // =========================
 
+    const isBadgeMode = DISPLAY_MODE === 'badge';
+
     function scan(root) {
         if (!root) return;
 
@@ -418,17 +413,17 @@
             const priceNodes = root.querySelectorAll?.(PRICE_SELECTOR);
             if (priceNodes) {
                 for (const el of priceNodes) {
-                    if (SAFETY_MODE === 'append') {
-                        processElementAppend(el);
+                    if (isBadgeMode) {
+                        processElementBadge(el);
                     } else {
-                        processElementReplace(el);
+                        processElementStandard(el);
                     }
                 }
             }
         }
 
-        // Only do text node walking in replace mode or for fallback in append mode
-        if (SAFETY_MODE !== 'append') {
+        // Text node walking — only in standard modes
+        if (!isBadgeMode) {
             const walker = document.createTreeWalker(
                 root,
                 NodeFilter.SHOW_TEXT,
@@ -438,7 +433,7 @@
 
             let node;
             while ((node = walker.nextNode())) {
-                processTextNodeReplace(node);
+                processTextNodeStandard(node);
             }
         }
     }
@@ -447,15 +442,18 @@
     // INIT
     // =========================
 
-    ensureBadgeStyle();
+    if (isBadgeMode) {
+        ensureBadgeStyle();
+    }
+
     scan(document.body);
 
     const observer = new MutationObserver((mutations) => {
         for (const mutation of mutations) {
             for (const node of mutation.addedNodes) {
                 if (node.nodeType === Node.TEXT_NODE) {
-                    if (SAFETY_MODE !== 'append') {
-                        processTextNodeReplace(node);
+                    if (!isBadgeMode) {
+                        processTextNodeStandard(node);
                     }
                 } else if (node.nodeType === Node.ELEMENT_NODE) {
                     scan(node);
