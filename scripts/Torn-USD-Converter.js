@@ -52,14 +52,6 @@
                 white-space: nowrap;
                 color: #8bc34a;
             }
-            .usd-original {
-                position: absolute;
-                width: 1px;
-                height: 1px;
-                overflow: hidden;
-                clip: rect(0, 0, 0, 0);
-                white-space: nowrap;
-            }
         `;
         document.head.appendChild(style);
     }
@@ -174,7 +166,7 @@
     function hideOriginalPrice(el, originalText) {
         if (el.dataset.usdOriginal === '1') return;
         const hidden = document.createElement("span");
-        hidden.className = "usd-original";
+        hidden.style.cssText = "position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap";
         hidden.textContent = originalText;
         el.dataset.usdOriginal = "1";
         el.insertBefore(hidden, el.firstChild);
