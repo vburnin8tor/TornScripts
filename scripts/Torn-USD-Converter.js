@@ -33,7 +33,7 @@
     const SIMPLE_PRICE_REGEX = /\$([\d,.]+)/;
 
     const PRICE_SELECTOR =
-        'span[class*="displayPrice"], div[class*="price"], div[class*="priceandTotal"]';
+        'span[class*="displayPrice"], div[class*="price"], div[class*="priceandTotal"], span[class*="tt-item-price"], span[class*="item-price"]';
 
     // =========================
     // BADGE STYLING (for "badge" mode only)
@@ -158,6 +158,45 @@
     }
 
     // =========================
+    // TORN TOOLS tt-item-price HANDLER
+    // =========================
+
+    function isTTItemPrice(el) {
+        return el.tagName === 'SPAN' && el.className.includes('tt-item-price');
+    }
+
+    function processTTItemPriceBadge(el) {
+        if (!el || el.dataset.usdConverted === '1') return;
+        // Process each child span that contains a price
+        for (const child of el.children) {
+            const text = child.textContent;
+            if (!text.includes('$')) continue;
+            // Remove pipe and trailing space from Torn Tools formatting
+            if (child.firstChild && child.firstChild.nodeType === Node.TEXT_NODE) {
+                child.firstChild.nodeValue = child.firstChild.nodeValue.replace(/\|\s*$/, '');
+            }
+            const converted = convertSinglePrice(text);
+            if (!converted) continue;
+            appendBadgeToElement(child, converted[1]);
+        }
+        el.dataset.usdConverted = '1';
+    }
+
+    function processTTItemPriceStandard(el) {
+        if (!el || el.dataset.usdConverted === '1') return;
+        for (const child of el.children) {
+            if (child.className.includes('tt-item-quantity')) continue;
+            const text = child.textContent;
+            if (!text.includes('$')) continue;
+            if (text.includes('(§') || text.includes('($')) continue;
+            // Remove pipe and trailing space from Torn Tools formatting
+            const cleaned = text.replace(/\|\s*$/, '');
+            child.textContent = convertText(cleaned);
+        }
+        el.dataset.usdConverted = '1';
+    }
+
+    // =========================
     // BADGE CREATION (for "badge" mode)
     // =========================
 
@@ -204,6 +243,12 @@
 
     function processElementBadge(el) {
         if (!el || el.dataset.usdConverted === '1') return;
+
+        // TORN TOOLS tt-item-price
+        if (isTTItemPrice(el)) {
+            processTTItemPriceBadge(el);
+            return;
+        }
 
         // STRUCTURED PRICE BLOCK
         if (isPriceAndTotalElement(el)) {
@@ -313,6 +358,12 @@
 
     function processElementStandard(el) {
         if (!el || el.dataset.usdConverted === '1') return;
+
+        // TORN TOOLS tt-item-price
+        if (isTTItemPrice(el)) {
+            processTTItemPriceStandard(el);
+            return;
+        }
 
         // STRUCTURED PRICE BLOCK
         if (isPriceAndTotalElement(el)) {
