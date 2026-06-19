@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn USD Converter
 // @author       shaul [3908280]
-// @version      1.9.3
+// @version      1.9.4
 // @description  Convert Torn cash displays to USD equivalents
 // @match        https://www.torn.com/*
 // @grant        GM_setValue
@@ -53,6 +53,26 @@
         'span[class*="displayPrice"], div[class*="price"], div[class*="priceandTotal"], span[class*="tt-item-price"], span[class*="item-price"]';
 
     const isBadgeMode = DISPLAY_MODE === 'badge';
+
+    // =========================
+    // FONT SHRINK FOR LONG VALUES
+    // =========================
+    function shrink(el) {
+        // Measure rendered width; if it exceeds container width, shrink 2pt
+        if (!el || !el.parentElement) return;
+        const container = el.parentElement;
+        const cs = getComputedStyle(el);
+        const currentSize = parseFloat(cs.fontSize) || 13;
+        // Use a canvas-based text measurement to avoid layout thrash
+        const canvas = shrink._canvas || (shrink._canvas = document.createElement('canvas'));
+        const ctx = canvas.getContext('2d');
+        ctx.font = `${currentSize}px ${cs.fontFamily}`;
+        const textWidth = ctx.measureText(el.textContent).width;
+        const containerWidth = container.clientWidth || container.offsetWidth;
+        if (containerWidth > 0 && textWidth > containerWidth * 1.05) {
+            el.style.fontSize = (currentSize - 2) + 'px';
+        }
+    }
 
     // =========================
     // BADGE STYLING
@@ -229,6 +249,7 @@
             const converted = convertSinglePrice(priceSpan.textContent);
             if (!converted) return;
             appendBadgeToElement(priceSpan, converted[1]);
+            shrink(priceSpan);
             el.dataset.usdConverted = '1';
             return;
         }
@@ -237,6 +258,7 @@
             const converted = convertSinglePrice(el.textContent);
             if (!converted) return;
             appendBadgeToElement(el, converted[1]);
+            shrink(el);
             el.dataset.usdConverted = '1';
             return;
         }
@@ -317,6 +339,7 @@
                 default:              stack = [`${price} (${usd}) (${total})`];
             }
             priceSpan.innerHTML = stack.join('<br>');
+            shrink(priceSpan);
             el.dataset.usdConverted = '1';
             return;
         }
@@ -336,6 +359,7 @@
                 default:              output = `${torn} (${usd})`;
             }
             el.innerHTML = output;
+            shrink(el);
             el.dataset.usdConverted = '1';
             return;
         }
@@ -619,7 +643,7 @@
                 <button class="usd-btn" id="${SETTINGS_ID}-reset">Reset to default</button>
                 <button class="usd-btn primary" id="${SETTINGS_ID}-apply">Apply &amp; reload</button>
             </div>
-            <div class="usd-status">v1.9.3 · Mode: <span class="usd-ok" id="${SETTINGS_ID}-cur-mode"></span></div>
+            <div class="usd-status">v1.9.4 · Mode: <span class="usd-ok" id="${SETTINGS_ID}-cur-mode"></span></div>
         `;
 
         backdrop.appendChild(panel);
