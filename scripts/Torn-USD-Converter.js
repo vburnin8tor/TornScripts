@@ -7,8 +7,6 @@
 // @grant        none
 // @license MIT
 // @namespace https://greasyfork.org/users/559205
-// @downloadURL https://update.greasyfork.org/scripts/582336/Torn%20USD%20Converter.user.js
-// @updateURL https://update.greasyfork.org/scripts/582336/Torn%20USD%20Converter.meta.js
 // ==/UserScript==
 
 (function () {
@@ -28,23 +26,11 @@
 
     const USD_PER_TORN = 5 / 23500000;
 
-    const PRICE_REGEX = /\$([\d,.]+)(k|m|b|t|mil|bil)?(?!\w)/gi;
-    const SIMPLE_PRICE_REGEX = /\$([\d,.]+)(k|m|b|t|mil|bil)?(?!\w)/gi;
+    const PRICE_REGEX = /\$([\d,.]+)([kMBT]|mil|bil| mil| bil)?(?!\w)/g;
+    const SIMPLE_PRICE_REGEX = /\$([\d,.]+)/;
 
     const PRICE_SELECTOR =
         'span[class*="displayPrice"], div[class*="price"], div[class*="priceandTotal"]';
-
-    // =========================
-    // FONT SHRINK FOR LONG VALUES
-    // =========================
-    function shrink(el) {
-        if (!el) return;
-        const text = el.textContent.trim();
-        // If the converted text is long (e.g. §3.291mil ($0.70)) shrink 2pt
-        if (text.length > 20) {
-            el.style.fontSize = 'smaller';
-        }
-    }
 
     // =========================
     // FORMATTING
@@ -168,122 +154,119 @@
     // =========================
 
     function processElement(el) {
-        if (!el || el.dataset.usdConverted === '1') return;
+    if (!el || el.dataset.usdConverted === '1') return;
 
-        // =========================
-        // STRUCTURED PRICE BLOCK
-        // =========================
-        if (isPriceAndTotalElement(el)) {
-            const priceSpan = el.querySelector('priceAndTotal');
-            const totalSpan = el.querySelector('span.titleTotal');
+    // =========================
+    // STRUCTURED PRICE BLOCK
+    // =========================
+    if (isPriceAndTotalElement(el)) {
+        const priceSpan = el.querySelector('priceAndTotal');
+        const totalSpan = el.querySelector('span:titleTotal');
 
-            if (!priceSpan) return;
+        if (!priceSpan) return;
 
-            const converted = convertSinglePrice(priceSpan.textContent);
-            if (!converted) return;
+        const converted = convertSinglePrice(priceSpan.textContent);
+        if (!converted) return;
 
-            const torn = converted[0];
-            const usd = converted[1];
-            const price = priceSpan.textContent;
-            const total = totalSpan.textContent;
-            let stack = [];
+        const torn = converted[0];
+        const usd = converted[1];
+        const price = priceSpan.textContent;
+        const total = totalSpan.textContent;
+        let stack = [];
 
-            switch (DISPLAY_MODE) {
+        switch (DISPLAY_MODE) {
 
-                case 'converted':
-                    stack = [`${usd} (${total})`];
-                    break;
+            case 'converted':
+                stack = [`${usd} (${total})`];
+                break;
 
-                case 'combined':
-                    stack = [`${usd} (${torn}) (${total})`];
-                    break;
+            case 'combined':
+                stack = [`${usd} (${torn}) (${total})` ];
+                break;
 
-                case 'reversed':
-                    stack = [`${torn} (${usd}) (${total})`];
-                    break;
+            case 'reversed':
+                stack = [`${torn} (${usd}) (${total})`];
+                break;
 
-                case 'full':
+            case 'full':
                     stack = [`${usd} (${price}) (${total})`];
-                    break;
+                break;
 
-                case 'fullreversed':
+            case 'fullreversed':
                     stack = [`${price} (${usd}) (${total})`];
-                    break;
+                break;
 
-                case 'original':
+            case 'original':
                     stack = [`${torn} (${total})`];
-                    break;
+                break;
 
-                default:
+            default:
                     stack = [`${price} (${usd}) (${total})`];
-            }
-
-            // rebuild ONLY price span
-            priceSpan.innerHTML = stack.join('<br>');
-            shrink(priceSpan);
-
-            el.dataset.usdConverted = '1';
-            return;
         }
 
-        // =========================
-        // NORMAL PRICE BLOCK
-        // =========================
-        if (isPriceElement(el)) {
-            const converted = convertSinglePrice(el.textContent);
-            if (!converted) return;
+        // rebuild ONLY price span
+        priceSpan.innerHTML = stack.join('<br>');
 
-            const torn = converted[0];
-            const usd = converted[1];
-
-            let output;
-
-            switch (DISPLAY_MODE) {
-                case 'converted':
-                    output = usd;
-                    break;
-
-                case 'combined':
-                    output = `${usd} (${torn})`;
-                    break;
-
-                case 'reversed':
-                    output = `${torn} (${usd})`;
-                    break;
-
-                case 'full':
-                    output = `${usd} (${torn})`;
-                    break;
-
-                case 'fullreversed':
-                    output = `${torn} (${usd})`;
-                    break;
-
-                case 'original':
-                    output = torn;
-                    break;
-
-                default:
-                    output = `${torn} (${usd})`;
-            }
-
-            el.innerHTML = output;
-            shrink(el);
-            el.dataset.usdConverted = '1';
-            return;
-        }
-
-        // =========================
-        // FALLBACK TEXT
-        // =========================
-        const text = el.textContent;
-        if (!text || !text.includes('$')) return;
-        if (text.includes('(§') || text.includes('($')) return;
-
-        el.textContent = convertText(text);
         el.dataset.usdConverted = '1';
+        return;
     }
 
+    // =========================
+    // NORMAL PRICE BLOCK
+    // =========================
+    if (isPriceElement(el)) {
+        const converted = convertSinglePrice(el.textContent);
+        if (!converted) return;
+
+        const torn = converted[0];
+        const usd = converted[1];
+
+        let output;
+
+        switch (DISPLAY_MODE) {
+            case 'converted':
+                output = usd;
+                break;
+
+            case 'combined':
+                output = `${usd} (${torn})`;
+                break;
+
+            case 'reversed':
+                output = `${torn} (${usd})`;
+                break;
+
+            case 'full':
+                output = `${usd} (${torn})`;
+                break;
+
+            case 'fullreversed':
+                output = `${torn} (${usd})`;
+                break;
+
+            case 'original':
+                output = torn;
+                break;
+
+            default:
+                output = `${torn} (${usd})`;
+        }
+
+        el.innerHTML = output;
+        el.dataset.usdConverted = '1';
+        return;
+    }
+
+    // =========================
+    // FALLBACK TEXT
+    // =========================
+    const text = el.textContent;
+    if (!text || !text.includes('$')) return;
+    if (text.includes('(§') || text.includes('($')) return;
+
+    el.textContent = convertText(text);
+    el.dataset.usdConverted = '1';
+}
     function processTextNode(node) {
         if (
             node.nodeType !== Node.TEXT_NODE ||
