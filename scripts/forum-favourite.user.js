@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Forum Favourite
 // @namespace    torn.forum.fav
-// @version      0.9.1
+// @version      0.9.2
 // @description  Lets you put your favourite sub-forums on top.
 // @author       shaul [3908280]
 // @match        https://www.torn.com/forums.php*
@@ -25,12 +25,13 @@
     var pollTimer = null;
     var processedLists = [];
     var colorPickerOpen = false;
+    var pencilInjected = false;
 
     GM_addStyle(
         '.ffStar { padding: 6px; cursor: pointer; display: inline-flex; align-items: center; vertical-align: middle; font-size: 15px; line-height: 1; color: var(--ff-star-color, ' + starColor + '); }' +
         '.forum-list { display: flex!important; flex-direction: column; }' +
         'li[isFav="yes"] { order: -1; }' +
-        '.ffPencil { padding: 4px; cursor: pointer; display: inline-flex; align-items: center; vertical-align: middle; font-size: 13px; line-height: 1; color: #888; margin-left: 4px; opacity: 0.6; transition: opacity 0.15s; }' +
+        '.ffPencil { padding: 4px 6px; cursor: pointer; display: inline-flex; align-items: center; vertical-align: middle; font-size: 14px; line-height: 1; color: #999; margin-left: 8px; opacity: 0.5; transition: opacity 0.15s; }' +
         '.ffPencil:hover { opacity: 1; }' +
         '#ffColorPicker { position: fixed; z-index: 99999; background: #1a1a2e; border: 1px solid #333; border-radius: 8px; padding: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); display: none; }' +
         '#ffColorPicker canvas { display: block; cursor: crosshair; border-radius: 4px; }' +
@@ -177,7 +178,7 @@
     function openPicker(anchorEl) {
         var picker = document.getElementById('ffColorPicker');
         var rect = anchorEl.getBoundingClientRect();
-        picker.style.left = (rect.left - 10) + 'px';
+        picker.style.left = rect.left + 'px';
         picker.style.top = (rect.bottom + 6) + 'px';
         picker.style.display = 'block';
         colorPickerOpen = true;
@@ -201,6 +202,7 @@
     function onHashChange() {
         clearInterval(pollTimer);
         processedLists = [];
+        pencilInjected = false;
 
         var hash = window.location.hash;
         if (!hash || hash === '' || hash.indexOf('/p=main') !== -1 || hash.indexOf('#/p=') !== 0) {
@@ -210,6 +212,33 @@
 
     function startPolling() {
         pollTimer = setInterval(function() {
+            // Inject single pencil next to page header
+            if (!pencilInjected) {
+                var header = document.querySelector('.forums-title');
+                if (!header) header = document.querySelector('h1');
+                if (!header) header = document.querySelector('.title');
+                if (header) {
+                    var existing = document.getElementById('ffPencil');
+                    if (!existing) {
+                        var pencil = document.createElement('span');
+                        pencil.id = 'ffPencil';
+                        pencil.className = 'ffPencil';
+                        pencil.textContent = '\u270E';
+                        pencil.addEventListener('click', function(e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (colorPickerOpen) {
+                                closePicker();
+                            } else {
+                                openPicker(pencil);
+                            }
+                        });
+                        header.appendChild(pencil);
+                    }
+                    pencilInjected = true;
+                }
+            }
+
             var forumLists = document.querySelectorAll('.forum-list:not([data-ff-processed])');
             if (forumLists.length === 0) return;
 
@@ -276,21 +305,6 @@
             var desc = li.querySelector('.name a .desc');
             if (desc) {
                 desc.appendChild(span);
-
-                // Add pencil button after the star
-                var pencil = document.createElement('span');
-                pencil.className = 'ffPencil';
-                pencil.textContent = '\u270E';
-                pencil.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (colorPickerOpen) {
-                        closePicker();
-                    } else {
-                        openPicker(pencil);
-                    }
-                });
-                desc.appendChild(pencil);
             }
         }
     }
