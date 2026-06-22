@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Forum Favourite
 // @namespace    torn.forum.fav
-// @version      0.9
+// @version      0.9.1
 // @description  Lets you put your favourite sub-forums on top.
 // @author       shaul [3908280]
 // @match        https://www.torn.com/forums.php*
@@ -15,22 +15,188 @@
     'use strict';
 
     var STORAGE_KEY = 'ff_forum_fav';
+    var COLOR_KEY = 'ff_star_color';
     var POLL_INTERVAL = 250;
-    var STAR_COLOR = '#f3da35';
+    var DEFAULT_COLOR = '#f3da35';
 
     var saved = loadSaved();
+    var starColor = loadColor();
 
     var pollTimer = null;
     var processedLists = [];
+    var colorPickerOpen = false;
 
     GM_addStyle(
-        '.ffStar { padding: 6px; cursor: pointer; display: inline-flex; align-items: center; vertical-align: middle; font-size: 15px; line-height: 1; color: ' + STAR_COLOR + '; }' +
+        '.ffStar { padding: 6px; cursor: pointer; display: inline-flex; align-items: center; vertical-align: middle; font-size: 15px; line-height: 1; color: var(--ff-star-color, ' + starColor + '); }' +
         '.forum-list { display: flex!important; flex-direction: column; }' +
-        'li[isFav="yes"] { order: -1; }'
+        'li[isFav="yes"] { order: -1; }' +
+        '.ffPencil { padding: 4px; cursor: pointer; display: inline-flex; align-items: center; vertical-align: middle; font-size: 13px; line-height: 1; color: #888; margin-left: 4px; opacity: 0.6; transition: opacity 0.15s; }' +
+        '.ffPencil:hover { opacity: 1; }' +
+        '#ffColorPicker { position: fixed; z-index: 99999; background: #1a1a2e; border: 1px solid #333; border-radius: 8px; padding: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); display: none; }' +
+        '#ffColorPicker canvas { display: block; cursor: crosshair; border-radius: 4px; }' +
+        '#ffColorPicker .ffPickerRow { display: flex; align-items: center; gap: 8px; margin-top: 8px; }' +
+        '#ffColorPicker .ffPreview { width: 28px; height: 28px; border-radius: 4px; border: 1px solid #555; flex-shrink: 0; }' +
+        '#ffColorPicker input[type="text"] { background: #111; border: 1px solid #444; color: #ddd; font-family: monospace; font-size: 13px; padding: 4px 6px; border-radius: 4px; width: 80px; outline: none; }' +
+        '#ffColorPicker input[type="text"]:focus { border-color: #666; }' +
+        '#ffColorPicker .ffApplyBtn { background: #2a2a4a; border: 1px solid #444; color: #ccc; font-size: 12px; padding: 4px 10px; border-radius: 4px; cursor: pointer; }' +
+        '#ffColorPicker .ffApplyBtn:hover { background: #3a3a5a; }'
     );
 
+    injectColorPicker();
     window.addEventListener('hashchange', onHashChange);
     onHashChange();
+
+    function loadColor() {
+        var c = GM_getValue(COLOR_KEY);
+        if (c && /^#[0-9a-fA-F]{6}$/.test(c)) return c;
+        return DEFAULT_COLOR;
+    }
+
+    function saveColor(c) {
+        GM_setValue(COLOR_KEY, c);
+    }
+
+    function injectColorPicker() {
+        var picker = document.createElement('div');
+        picker.id = 'ffColorPicker';
+
+        var canvas = document.createElement('canvas');
+        canvas.width = 180;
+        canvas.height = 180;
+        picker.appendChild(canvas);
+
+        var row = document.createElement('div');
+        row.className = 'ffPickerRow';
+
+        var preview = document.createElement('div');
+        preview.className = 'ffPreview';
+        preview.style.background = starColor;
+        row.appendChild(preview);
+
+        var hexInput = document.createElement('input');
+        hexInput.type = 'text';
+        hexInput.maxLength = 7;
+        hexInput.value = starColor;
+        hexInput.placeholder = '#rrggbb';
+        row.appendChild(hexInput);
+
+        var applyBtn = document.createElement('button');
+        applyBtn.className = 'ffApplyBtn';
+        applyBtn.textContent = 'Apply';
+        row.appendChild(applyBtn);
+
+        picker.appendChild(row);
+        document.body.appendChild(picker);
+
+        drawWheel(canvas, starColor);
+
+        var ctx = canvas.getContext('2d');
+
+        function pickColor(e) {
+            var rect = canvas.getBoundingClientRect();
+            var x = e.clientX - rect.left;
+            var y = e.clientY - rect.top;
+            var px = ctx.getImageData(x, y, 1, 1).data;
+            var hex = rgbToHex(px[0], px[1], px[2]);
+            preview.style.background = hex;
+            hexInput.value = hex;
+        }
+
+        canvas.addEventListener('mousedown', function(e) {
+            pickColor(e);
+            var moveHandler = function(ev) { pickColor(ev); };
+            var upHandler = function() {
+                document.removeEventListener('mousemove', moveHandler);
+                document.removeEventListener('mouseup', upHandler);
+            };
+            document.addEventListener('mousemove', moveHandler);
+            document.addEventListener('mouseup', upHandler);
+        });
+
+        hexInput.addEventListener('input', function() {
+            var v = hexInput.value;
+            if (/^#[0-9a-fA-F]{6}$/.test(v)) {
+                preview.style.background = v;
+            }
+        });
+
+        hexInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                applyBtn.click();
+            }
+        });
+
+        applyBtn.addEventListener('click', function() {
+            var v = hexInput.value.trim();
+            if (!/^#[0-9a-fA-F]{6}$/.test(v)) return;
+            starColor = v;
+            saveColor(v);
+            document.documentElement.style.setProperty('--ff-star-color', v);
+            closePicker();
+        });
+    }
+
+    function drawWheel(canvas, highlightHex) {
+        var ctx = canvas.getContext('2d');
+        var w = canvas.width, h = canvas.height;
+        var cx = w / 2, cy = h / 2;
+        var r = w / 2 - 2;
+
+        // Draw hue ring
+        for (var angle = 0; angle < 360; angle += 1) {
+            var startAngle = (angle - 1) * Math.PI / 180;
+            var endAngle = (angle + 1) * Math.PI / 180;
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, startAngle, endAngle);
+            ctx.strokeStyle = 'hsl(' + angle + ', 100%, 50%)';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+        }
+
+        // Draw inner saturation/lightness triangle-ish gradient
+        var innerR = r - 8;
+        for (var y = 0; y < h; y++) {
+            for (var x = 0; x < w; x++) {
+                var dx = x - cx, dy = y - cy;
+                var dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist <= innerR) {
+                    var hue = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 360;
+                    var sat = (dist / innerR) * 100;
+                    var light = 50 + (0.5 - y / h) * 40;
+                    ctx.fillStyle = 'hsl(' + hue + ', ' + sat + '%, ' + light + '%)';
+                    ctx.fillRect(x, y, 1, 1);
+                }
+            }
+        }
+    }
+
+    function rgbToHex(r, g, b) {
+        return '#' + [r, g, b].map(function(v) { return v.toString(16).padStart(2, '0'); }).join('');
+    }
+
+    function openPicker(anchorEl) {
+        var picker = document.getElementById('ffColorPicker');
+        var rect = anchorEl.getBoundingClientRect();
+        picker.style.left = (rect.left - 10) + 'px';
+        picker.style.top = (rect.bottom + 6) + 'px';
+        picker.style.display = 'block';
+        colorPickerOpen = true;
+    }
+
+    function closePicker() {
+        var picker = document.getElementById('ffColorPicker');
+        picker.style.display = 'none';
+        colorPickerOpen = false;
+    }
+
+    // Close picker when clicking outside
+    document.addEventListener('click', function(e) {
+        if (!colorPickerOpen) return;
+        var picker = document.getElementById('ffColorPicker');
+        if (picker && !picker.contains(e.target) && !e.target.classList.contains('ffPencil')) {
+            closePicker();
+        }
+    });
 
     function onHashChange() {
         clearInterval(pollTimer);
@@ -110,6 +276,21 @@
             var desc = li.querySelector('.name a .desc');
             if (desc) {
                 desc.appendChild(span);
+
+                // Add pencil button after the star
+                var pencil = document.createElement('span');
+                pencil.className = 'ffPencil';
+                pencil.textContent = '\u270E';
+                pencil.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (colorPickerOpen) {
+                        closePicker();
+                    } else {
+                        openPicker(pencil);
+                    }
+                });
+                desc.appendChild(pencil);
             }
         }
     }
