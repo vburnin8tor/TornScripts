@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Radio Player
 // @namespace    tornscripts
-// @version      1.1.0
+// @version      1.2.0
 // @description  Embeds the caster.fm radio player on every Torn page. Autoplays.
 // @match        https://www.torn.com/*
 // @grant        none
@@ -24,14 +24,26 @@
     document.head.appendChild(s);
   }
 
-  // wrapper styles
+  // wrapper styles — top right, above Torn's UI
   var style = document.createElement('style');
   style.textContent =
     '#' + WRAPPER_ID + ' {' +
     '  position: fixed;' +
-    '  bottom: 12px;' +
-    '  right: 12px;' +
-    '  z-index: 99999;' +
+    '  top: 8px;' +
+    '  right: 8px;' +
+    '  z-index: 999999;' +
+    '  width: 280px;' +
+    '  pointer-events: auto;' +
+    '}' +
+    // hide the fallback "Shoutcast Hosting" links the embed injects
+    '#' + WRAPPER_ID + ' .cstrEmbed a {' +
+    '  display: none !important;' +
+    '}' +
+    // make sure the iframe the widget creates is clickable
+    '#' + WRAPPER_ID + ' iframe {' +
+    '  width: 100% !important;' +
+    '  border: none !important;' +
+    '  pointer-events: auto !important;' +
     '}';
   document.head.appendChild(style);
 
@@ -47,6 +59,7 @@
   embed.setAttribute('data-channelId', 'a21639a7-533c-42ce-b8aa-af562a550644');
   embed.setAttribute('data-rendered', 'false');
   embed.className = 'cstrEmbed';
+  // keep the fallback links for noscript but hide them with CSS above
   embed.innerHTML =
     '<a href="https://www.caster.fm">Shoutcast Hosting</a> ' +
     '<a href="https://www.caster.fm">Stream Hosting</a> ' +
