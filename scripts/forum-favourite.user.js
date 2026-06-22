@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Forum Favourite
 // @namespace    torn.forum.fav
-// @version      0.9.2
+// @version      0.9.3
 // @description  Lets you put your favourite sub-forums on top.
 // @author       shaul [3908280]
 // @match        https://www.torn.com/forums.php*
@@ -212,18 +212,15 @@
 
     function startPolling() {
         pollTimer = setInterval(function() {
-            // Inject single pencil next to page header
+            // Inject single pencil into the top header — same pattern as exp branch
             if (!pencilInjected) {
-                var header = document.querySelector('.forums-title');
-                if (!header) header = document.querySelector('h1');
-                if (!header) header = document.querySelector('.title');
-                if (header) {
-                    var existing = document.getElementById('ffPencil');
-                    if (!existing) {
+                var topWrap = document.querySelector('.forum-wrap');
+                if (topWrap) {
+                    var titleName = topWrap.querySelector('.title-black .name');
+                    if (titleName && !titleName.querySelector('.ffPencil')) {
                         var pencil = document.createElement('span');
-                        pencil.id = 'ffPencil';
                         pencil.className = 'ffPencil';
-                        pencil.textContent = '\u270E';
+                        pencil.textContent = ' \u270E';
                         pencil.addEventListener('click', function(e) {
                             e.preventDefault();
                             e.stopPropagation();
@@ -233,9 +230,9 @@
                                 openPicker(pencil);
                             }
                         });
-                        header.appendChild(pencil);
+                        titleName.appendChild(pencil);
+                        pencilInjected = true;
                     }
-                    pencilInjected = true;
                 }
             }
 
