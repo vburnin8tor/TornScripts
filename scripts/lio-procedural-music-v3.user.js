@@ -431,7 +431,7 @@
       }
       #${PANEL_ID} .lio-handle-label {
         writing-mode: vertical-rl; transform: rotate(180deg);
-        font-size: 9px; font-weight: 700; letter-spacing: 2px;
+        font-size: 11px; font-weight: 700; letter-spacing: 2px;
         color: var(--lio-accent); opacity: 0.7;
       }
 
@@ -444,11 +444,11 @@
         margin-bottom: 6px; cursor: grab; user-select: none;
       }
       #${PANEL_ID} .lio-topbar-title {
-        flex: 1; font-size: 11px; font-weight: 700;
+        flex: 1; font-size: 14px; font-weight: 700;
         color: var(--lio-accent);
       }
       #${PANEL_ID} .lio-topbar-status {
-        font-size: 8px; color: var(--lio-dim); max-width: 90px;
+        font-size: 10px; color: var(--lio-dim); max-width: 90px;
         text-overflow: ellipsis; overflow: hidden; white-space: nowrap;
         text-align: right;
       }
@@ -456,7 +456,7 @@
       /* ── tabs ── */
       #${PANEL_ID} .lio-tabs { display: flex; gap: 2px; margin-bottom: 6px; }
       #${PANEL_ID} .lio-tab {
-        flex: 1; padding: 4px 2px; font-size: 8px; font-weight: 700;
+        flex: 1; padding: 5px 3px; font-size: 10px; font-weight: 700;
         background: rgba(128,128,128,0.08); border: 1px solid rgba(128,128,128,0.1);
         border-radius: 6px; color: var(--lio-dim); cursor: pointer;
         text-align: center; transition: all 0.12s;
@@ -478,7 +478,7 @@
 
       /* ── buttons ── */
       #${PANEL_ID} button {
-        padding: 5px 6px; font-size: 9px; font-weight: 700;
+        padding: 6px 7px; font-size: 11px; font-weight: 700;
         border: 1px solid rgba(128,128,128,0.15); border-radius: 7px;
         background: rgba(128,128,128,0.08); color: var(--lio-text);
         cursor: pointer; transition: all 0.12s; outline: none;
@@ -486,7 +486,7 @@
       #${PANEL_ID} button:hover { background: rgba(128,128,128,0.18); }
       #${PANEL_ID} button.lio-play-btn {
         background: var(--lio-accent); color: var(--lio-bg);
-        border-color: var(--lio-accent); font-size: 10px;
+        border-color: var(--lio-accent); font-size: 12px;
       }
       #${PANEL_ID} button.lio-play-btn.playing {
         background: var(--lio-accent2); animation: lio-pulse 1.5s ease-in-out infinite;
@@ -498,7 +498,7 @@
 
       /* ── selects & inputs ── */
       #${PANEL_ID} select, #${PANEL_ID} input[type="text"], #${PANEL_ID} input[type="number"] {
-        width: 100%; padding: 4px 6px; font-size: 9px;
+        width: 100%; padding: 5px 7px; font-size: 11px;
         border: 1px solid rgba(128,128,128,0.15); border-radius: 7px;
         background: rgba(128,128,128,0.06); color: var(--lio-text); outline: none;
         font-family: var(--lio-font);
@@ -507,7 +507,7 @@
 
       /* ── labels ── */
       #${PANEL_ID} .lio-label {
-        font-size: 8px; color: var(--lio-dim); margin-bottom: 2px;
+        font-size: 10px; color: var(--lio-dim); margin-bottom: 2px;
         font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
       }
       #${PANEL_ID} .lio-labeled { display: grid; gap: 2px; }
@@ -515,8 +515,8 @@
       /* ── sliders ── */
       #${PANEL_ID} .lio-slider-row { display: grid; gap: 1px; margin-bottom: 4px; }
       #${PANEL_ID} .lio-slider-header { display: flex; justify-content: space-between; align-items: center; }
-      #${PANEL_ID} .lio-slider-name { font-size: 8px; color: var(--lio-dim); font-weight: 600; text-transform: uppercase; }
-      #${PANEL_ID} .lio-slider-val { font-size: 8px; color: var(--lio-accent); font-weight: 700; min-width: 28px; text-align: right; }
+      #${PANEL_ID} .lio-slider-name { font-size: 10px; color: var(--lio-dim); font-weight: 600; text-transform: uppercase; }
+      #${PANEL_ID} .lio-slider-val { font-size: 10px; color: var(--lio-accent); font-weight: 700; min-width: 28px; text-align: right; }
       #${PANEL_ID} input[type="range"] {
         width: 100%; height: 3px; margin: 0;
         -webkit-appearance: none; appearance: none;
@@ -551,13 +551,13 @@
       }
       #${PANEL_ID} .lio-toggle.on .lio-toggle-dot { background: var(--lio-accent); }
       #${PANEL_ID} .lio-toggle.on .lio-toggle-dot::after { transform: translateX(8px); }
-      #${PANEL_ID} .lio-toggle-label { font-size: 8px; font-weight: 700; color: var(--lio-dim); }
+      #${PANEL_ID} .lio-toggle-label { font-size: 10px; font-weight: 700; color: var(--lio-dim); }
       #${PANEL_ID} .lio-toggle.on .lio-toggle-label { color: var(--lio-accent); }
 
       /* ── sequencer ── */
       #${PANEL_ID} .lio-seq { margin-bottom: 4px; }
       #${PANEL_ID} .lio-seq-row { display: flex; gap: 2px; margin-bottom: 2px; align-items: center; }
-      #${PANEL_ID} .lio-seq-name { font-size: 7px; color: var(--lio-dim); font-weight: 700; width: 26px; flex-shrink: 0; }
+      #${PANEL_ID} .lio-seq-name { font-size: 9px; color: var(--lio-dim); font-weight: 700; width: 26px; flex-shrink: 0; }
       #${PANEL_ID} .lio-seq-cell {
         flex: 1; height: 12px; border-radius: 2px;
         background: rgba(128,128,128,0.1); cursor: pointer;
@@ -570,7 +570,7 @@
       #${PANEL_ID} .lio-status-bar {
         margin-top: 5px; padding: 3px 6px;
         background: rgba(128,128,128,0.05); border-radius: 5px;
-        font-size: 8px; color: var(--lio-dim); min-height: 18px;
+        font-size: 10px; color: var(--lio-dim); min-height: 20px;
         border: 1px solid rgba(128,128,128,0.08);
         display: flex; align-items: center; gap: 4px;
       }
@@ -596,11 +596,11 @@
       #${PANEL_ID} .lio-preset-card.active { border-color: var(--lio-accent); background: rgba(128,128,128,0.1); }
       #${PANEL_ID} .lio-preset-card-icon { font-size: 14px; flex-shrink: 0; }
       #${PANEL_ID} .lio-preset-card-info { flex: 1; min-width: 0; }
-      #${PANEL_ID} .lio-preset-card-name { font-size: 9px; font-weight: 700; color: var(--lio-text); }
-      #${PANEL_ID} .lio-preset-card-meta { font-size: 7px; color: var(--lio-dim); }
-      #${PANEL_ID} .lio-preset-card-bpm { font-size: 8px; color: var(--lio-accent); font-weight: 700; }
+      #${PANEL_ID} .lio-preset-card-name { font-size: 11px; font-weight: 700; color: var(--lio-text); }
+      #${PANEL_ID} .lio-preset-card-meta { font-size: 9px; color: var(--lio-dim); }
+      #${PANEL_ID} .lio-preset-card-bpm { font-size: 10px; color: var(--lio-accent); font-weight: 700; }
       #${PANEL_ID} .lio-preset-badge {
-        font-size: 6px; padding: 1px 4px; border-radius: 3px;
+        font-size: 9px; padding: 2px 5px; border-radius: 3px;
         background: rgba(128,128,128,0.1); color: var(--lio-dim);
         text-transform: uppercase; font-weight: 700; letter-spacing: 0.3px;
       }
