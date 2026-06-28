@@ -1,0 +1,1004 @@
+// ==UserScript==
+// @name         Procedural Music Synth Panel for Torn PDA
+// @namespace    qian751.torn.procedural.music
+// @version      1.0.0
+// @description  Procedural music generator panel for Torn PDA. No external audio URLs.
+// @author       Qian751
+// @match        https://www.torn.com/*
+// @match        https://torn.com/*
+// @run-at       document-end
+// @grant        none
+// @downloadURL https://update.greasyfork.org/scripts/584693/Procedural%20Music%20Synth%20Panel%20for%20Torn%20PDA.user.js
+// @updateURL https://update.greasyfork.org/scripts/584693/Procedural%20Music%20Synth%20Panel%20for%20Torn%20PDA.meta.js
+// ==/UserScript==
+
+(function () {
+  'use strict';
+
+  const PANEL_ID = 'lio-procedural-music-panel';
+  const STYLE_ID = 'lio-procedural-music-style';
+  const STORE_KEY = 'lioProceduralMusicV1';
+
+  if (window.__lioProceduralMusicLoaded) return;
+  window.__lioProceduralMusicLoaded = true;
+
+  const presets = {
+    neonwar: {
+      name: 'Neon War Chain',
+      root: 45,
+      scale: 'minor',
+      wave: 'sawtooth',
+      bassWave: 'square',
+      bpm: 124,
+      swing: 0.04,
+      chords: [0, 5, 3, 6]
+    },
+    island: {
+      name: 'Private Island Chill',
+      root: 48,
+      scale: 'major',
+      wave: 'triangle',
+      bassWave: 'sine',
+      bpm: 88,
+      swing: 0.08,
+      chords: [0, 4, 5, 3]
+    },
+    bazaar: {
+      name: 'Bazaar Panic',
+      root: 42,
+      scale: 'dark',
+      wave: 'square',
+      bassWave: 'sawtooth',
+      bpm: 138,
+      swing: 0.02,
+      chords: [0, 2, 5, 1]
+    },
+    stealth: {
+      name: 'Stealth Hospital Run',
+      root: 43,
+      scale: 'dark',
+      wave: 'sine',
+      bassWave: 'triangle',
+      bpm: 104,
+      swing: 0.12,
+      chords: [0, 1, 3, 2]
+    }
+  };
+
+  const scales = {
+    minor: [0, 2, 3, 5, 7, 8, 10, 12],
+    major: [0, 2, 4, 5, 7, 9, 11, 12],
+    dark: [0, 1, 3, 5, 7, 8, 10, 12]
+  };
+
+  const defaultState = {
+    collapsed: false,
+    x: null,
+    y: null,
+    preset: 'neonwar',
+    bpm: 124,
+    energy: 0.62,
+    volume: 0.34,
+    seed: 'torn-war-777',
+    drums: true,
+    bass: true,
+    melody: true,
+    fx: true
+  };
+
+  function loadState() {
+    try {
+      return Object.assign({}, defaultState, JSON.parse(localStorage.getItem(STORE_KEY) || '{}'));
+    } catch (err) {
+      return Object.assign({}, defaultState);
+    }
+  }
+
+  const state = loadState();
+
+  function saveState() {
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify(state));
+    } catch (err) {}
+  }
+
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  function hashString(str) {
+    let h = 2166136261;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+
+  function mulberry32(seed) {
+    return function () {
+      let t = seed += 0x6D2B79F5;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function midiToFreq(midi) {
+    return 440 * Math.pow(2, (midi - 69) / 12);
+  }
+
+  function injectCss() {
+    if (document.getElementById(STYLE_ID)) return;
+
+    const style = document.createElement('style');
+    style.id = STYLE_ID;
+    style.textContent = `
+      #${PANEL_ID} {
+        position: fixed;
+        width: 326px;
+        max-width: calc(100vw - 12px);
+        z-index: 999999;
+        color: white;
+        background: rgba(15, 15, 24, 0.94);
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 18px;
+        overflow: hidden;
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        backdrop-filter: blur(12px);
+        transition: transform 0.22s ease;
+      }
+
+      #${PANEL_ID}.lio-collapsed {
+        transform: translateX(calc(100% - 46px));
+      }
+
+      #${PANEL_ID} * {
+        box-sizing: border-box;
+      }
+
+      #${PANEL_ID} .lio-handle {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 46px;
+        height: 100%;
+        display: grid;
+        place-items: center;
+        background: linear-gradient(180deg, rgba(255, 60, 180, 0.96), rgba(70, 120, 255, 0.96));
+        font-size: 22px;
+        font-weight: 900;
+        cursor: pointer;
+        user-select: none;
+      }
+
+      #${PANEL_ID} .lio-inner {
+        padding: 12px 12px 12px 58px;
+      }
+
+      #${PANEL_ID} .lio-drag {
+        cursor: grab;
+        touch-action: none;
+        user-select: none;
+      }
+
+      #${PANEL_ID} .lio-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      #${PANEL_ID} .lio-title strong {
+        font-size: 14px;
+      }
+
+      #${PANEL_ID} .lio-small {
+        font-size: 11px;
+        line-height: 1.3;
+        opacity: 0.72;
+      }
+
+      #${PANEL_ID} button,
+      #${PANEL_ID} select,
+      #${PANEL_ID} input {
+        width: 100%;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.08);
+        color: #fff;
+        padding: 8px 9px;
+        outline: none;
+      }
+
+      #${PANEL_ID} button {
+        cursor: pointer;
+        font-weight: 800;
+      }
+
+      #${PANEL_ID} button:hover {
+        background: rgba(255, 255, 255, 0.15);
+      }
+
+      #${PANEL_ID} select option {
+        color: #111;
+      }
+
+      #${PANEL_ID} input[type="range"] {
+        padding: 0;
+        accent-color: #ff4bb4;
+      }
+
+      #${PANEL_ID} label {
+        display: grid;
+        gap: 4px;
+        font-size: 11px;
+        opacity: 0.9;
+      }
+
+      #${PANEL_ID} .lio-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 7px;
+        margin-top: 7px;
+      }
+
+      #${PANEL_ID} .lio-row-3 {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 7px;
+        margin-top: 7px;
+      }
+
+      #${PANEL_ID} .lio-stack {
+        display: grid;
+        gap: 7px;
+      }
+
+      #${PANEL_ID} .lio-sep {
+        height: 1px;
+        margin: 10px 0;
+        background: rgba(255, 255, 255, 0.12);
+      }
+
+      #${PANEL_ID} .lio-mini-btn {
+        width: auto;
+        min-width: 36px;
+        padding: 7px 9px;
+      }
+
+      #${PANEL_ID} .lio-checks {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+        margin-top: 7px;
+      }
+
+      #${PANEL_ID} .lio-checks label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 11px;
+        padding: 7px;
+        background: rgba(255, 255, 255, 0.06);
+      }
+
+      #${PANEL_ID} .lio-checks input {
+        width: auto;
+      }
+
+      #${PANEL_ID} .lio-status {
+        min-height: 32px;
+        margin-top: 8px;
+        font-size: 11px;
+        line-height: 1.35;
+        opacity: 0.76;
+      }
+    `;
+
+    document.head.appendChild(style);
+  }
+
+  function ready(fn) {
+    if (document.body) fn();
+    else document.addEventListener('DOMContentLoaded', fn, { once: true });
+  }
+
+  ready(function init() {
+    if (document.getElementById(PANEL_ID)) return;
+
+    injectCss();
+
+    const panel = document.createElement('div');
+    panel.id = PANEL_ID;
+    if (state.collapsed) panel.classList.add('lio-collapsed');
+
+    panel.innerHTML = `
+      <div class="lio-handle" title="Slide panel">♬</div>
+
+      <div class="lio-inner">
+        <div class="lio-title lio-drag">
+          <div>
+            <strong>🎛️ Lio Proc Synth</strong>
+            <div class="lio-small">generated live, no music URL</div>
+          </div>
+          <button class="lio-mini-btn" id="lioToggle">⇄</button>
+        </div>
+
+        <div class="lio-stack">
+          <select id="lioPreset"></select>
+
+          <div class="lio-row">
+            <button id="lioPlay">Start</button>
+            <button id="lioSeedNew">New Seed</button>
+          </div>
+
+          <label>
+            BPM: <span id="lioBpmValue"></span>
+            <input id="lioBpm" type="range" min="70" max="170" step="1">
+          </label>
+
+          <label>
+            Energy: <span id="lioEnergyValue"></span>
+            <input id="lioEnergy" type="range" min="0" max="1" step="0.01">
+          </label>
+
+          <label>
+            Volume: <span id="lioVolumeValue"></span>
+            <input id="lioVolume" type="range" min="0" max="1" step="0.01">
+          </label>
+
+          <input id="lioSeed" placeholder="seed, contoh: torn-war-777">
+
+          <div class="lio-checks">
+            <label><input id="lioDrums" type="checkbox"> Drums</label>
+            <label><input id="lioBass" type="checkbox"> Bass</label>
+            <label><input id="lioMelody" type="checkbox"> Melody</label>
+            <label><input id="lioFx" type="checkbox"> FX</label>
+          </div>
+
+          <div class="lio-row">
+            <button id="lioRandomize">Randomize</button>
+            <button id="lioPanic">Panic Stop</button>
+          </div>
+        </div>
+
+        <div class="lio-status" id="lioStatus"></div>
+      </div>
+    `;
+
+    document.body.appendChild(panel);
+
+    const handle = panel.querySelector('.lio-handle');
+    const dragArea = panel.querySelector('.lio-drag');
+    const toggleBtn = panel.querySelector('#lioToggle');
+    const presetSelect = panel.querySelector('#lioPreset');
+    const playBtn = panel.querySelector('#lioPlay');
+    const newSeedBtn = panel.querySelector('#lioSeedNew');
+    const bpmInput = panel.querySelector('#lioBpm');
+    const bpmValue = panel.querySelector('#lioBpmValue');
+    const energyInput = panel.querySelector('#lioEnergy');
+    const energyValue = panel.querySelector('#lioEnergyValue');
+    const volumeInput = panel.querySelector('#lioVolume');
+    const volumeValue = panel.querySelector('#lioVolumeValue');
+    const seedInput = panel.querySelector('#lioSeed');
+    const drumsInput = panel.querySelector('#lioDrums');
+    const bassInput = panel.querySelector('#lioBass');
+    const melodyInput = panel.querySelector('#lioMelody');
+    const fxInput = panel.querySelector('#lioFx');
+    const randomizeBtn = panel.querySelector('#lioRandomize');
+    const panicBtn = panel.querySelector('#lioPanic');
+    const status = panel.querySelector('#lioStatus');
+
+    let audioCtx = null;
+    let master = null;
+    let compressor = null;
+    let delay = null;
+    let feedback = null;
+    let wet = null;
+    let noiseBuffer = null;
+
+    let isPlaying = false;
+    let timer = null;
+    let currentStep = 0;
+    let nextNoteTime = 0;
+    let rng = mulberry32(hashString(state.seed + state.preset));
+
+    function setStatus(text) {
+      status.textContent = text;
+    }
+
+    function renderPresetOptions() {
+      presetSelect.innerHTML = '';
+
+      Object.keys(presets).forEach((key) => {
+        const option = document.createElement('option');
+        option.value = key;
+        option.textContent = presets[key].name;
+        presetSelect.appendChild(option);
+      });
+
+      if (!presets[state.preset]) state.preset = 'neonwar';
+      presetSelect.value = state.preset;
+    }
+
+    function renderValues() {
+      bpmInput.value = String(state.bpm);
+      bpmValue.textContent = `${state.bpm}`;
+
+      energyInput.value = String(state.energy);
+      energyValue.textContent = `${Math.round(state.energy * 100)}%`;
+
+      volumeInput.value = String(state.volume);
+      volumeValue.textContent = `${Math.round(state.volume * 100)}%`;
+
+      seedInput.value = state.seed;
+
+      drumsInput.checked = !!state.drums;
+      bassInput.checked = !!state.bass;
+      melodyInput.checked = !!state.melody;
+      fxInput.checked = !!state.fx;
+    }
+
+    function secondsPerStep() {
+      return (60 / clamp(Number(state.bpm) || 120, 50, 220)) / 4;
+    }
+
+    function makeNoiseBuffer() {
+      const length = Math.floor(audioCtx.sampleRate * 2);
+      const buffer = audioCtx.createBuffer(1, length, audioCtx.sampleRate);
+      const data = buffer.getChannelData(0);
+
+      for (let i = 0; i < length; i++) {
+        data[i] = Math.random() * 2 - 1;
+      }
+
+      return buffer;
+    }
+
+    function ensureAudio() {
+      if (audioCtx) return;
+
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) {
+        setStatus('Web Audio API tidak tersedia di browser ini, gomen~');
+        return;
+      }
+
+      audioCtx = new AudioContextClass();
+
+      master = audioCtx.createGain();
+      master.gain.value = 0.0001;
+
+      compressor = audioCtx.createDynamicsCompressor();
+      compressor.threshold.value = -18;
+      compressor.knee.value = 18;
+      compressor.ratio.value = 4;
+      compressor.attack.value = 0.003;
+      compressor.release.value = 0.18;
+
+      delay = audioCtx.createDelay(1.0);
+      delay.delayTime.value = 0.23;
+
+      feedback = audioCtx.createGain();
+      feedback.gain.value = 0.22;
+
+      wet = audioCtx.createGain();
+      wet.gain.value = state.fx ? 0.16 : 0.0;
+
+      master.connect(compressor);
+      compressor.connect(audioCtx.destination);
+
+      master.connect(delay);
+      delay.connect(feedback);
+      feedback.connect(delay);
+      delay.connect(wet);
+      wet.connect(compressor);
+
+      noiseBuffer = makeNoiseBuffer();
+    }
+
+    function updateAudioSettings() {
+      if (!audioCtx || !master) return;
+
+      const now = audioCtx.currentTime;
+      const targetVolume = isPlaying ? clamp(Number(state.volume) || 0, 0, 1) : 0.0001;
+
+      master.gain.cancelScheduledValues(now);
+      master.gain.setTargetAtTime(targetVolume, now, 0.035);
+
+      if (wet) {
+        wet.gain.setTargetAtTime(state.fx ? 0.16 : 0.0, now, 0.05);
+      }
+    }
+
+    function playTone(options) {
+      if (!audioCtx || !master) return;
+
+      const time = options.time;
+      const dur = Math.max(0.03, options.dur || 0.12);
+      const vol = clamp(options.vol || 0.12, 0.001, 0.8);
+      const attack = Math.max(0.002, options.attack || 0.01);
+      const release = Math.max(0.02, options.release || 0.08);
+
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+
+      osc.type = options.type || 'sine';
+      osc.frequency.setValueAtTime(options.freq, time);
+
+      if (options.freqEnd) {
+        osc.frequency.exponentialRampToValueAtTime(Math.max(20, options.freqEnd), time + dur * 0.55);
+      }
+
+      gain.gain.setValueAtTime(0.0001, time);
+      gain.gain.exponentialRampToValueAtTime(vol, time + attack);
+      gain.gain.exponentialRampToValueAtTime(0.0001, time + dur + release);
+
+      if (options.filter) {
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = options.filterType || 'lowpass';
+        filter.frequency.setValueAtTime(options.filter, time);
+        filter.Q.value = options.q || 0.8;
+        osc.connect(filter);
+        filter.connect(gain);
+      } else {
+        osc.connect(gain);
+      }
+
+      gain.connect(master);
+
+      osc.start(time);
+      osc.stop(time + dur + release + 0.03);
+    }
+
+    function playNoise(options) {
+      if (!audioCtx || !master || !noiseBuffer) return;
+
+      const time = options.time;
+      const dur = Math.max(0.02, options.dur || 0.08);
+      const vol = clamp(options.vol || 0.12, 0.001, 0.8);
+
+      const src = audioCtx.createBufferSource();
+      const gain = audioCtx.createGain();
+      const filter = audioCtx.createBiquadFilter();
+
+      src.buffer = noiseBuffer;
+      src.loop = true;
+
+      filter.type = options.filterType || 'highpass';
+      filter.frequency.setValueAtTime(options.filter || 7000, time);
+      filter.Q.value = options.q || 0.7;
+
+      gain.gain.setValueAtTime(0.0001, time);
+      gain.gain.exponentialRampToValueAtTime(vol, time + 0.006);
+      gain.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+
+      src.connect(filter);
+      filter.connect(gain);
+      gain.connect(master);
+
+      src.start(time);
+      src.stop(time + dur + 0.02);
+    }
+
+    function playKick(time, power) {
+      playTone({
+        time,
+        freq: 145,
+        freqEnd: 42,
+        dur: 0.18,
+        type: 'sine',
+        vol: 0.36 * power,
+        attack: 0.004,
+        release: 0.06
+      });
+
+      playNoise({
+        time,
+        dur: 0.025,
+        vol: 0.07 * power,
+        filterType: 'lowpass',
+        filter: 900
+      });
+    }
+
+    function playSnare(time, power) {
+      playNoise({
+        time,
+        dur: 0.11,
+        vol: 0.18 * power,
+        filterType: 'bandpass',
+        filter: 1800,
+        q: 0.9
+      });
+
+      playTone({
+        time,
+        freq: 185,
+        dur: 0.08,
+        type: 'triangle',
+        vol: 0.07 * power,
+        attack: 0.004,
+        release: 0.04
+      });
+    }
+
+    function playHat(time, power, open) {
+      playNoise({
+        time,
+        dur: open ? 0.16 : 0.045,
+        vol: (open ? 0.08 : 0.055) * power,
+        filterType: 'highpass',
+        filter: open ? 6500 : 8500,
+        q: 0.5
+      });
+    }
+
+    function pick(array) {
+      return array[Math.floor(rng() * array.length)];
+    }
+
+    function scheduleStep(step, rawTime) {
+      const preset = presets[state.preset] || presets.neonwar;
+      const scale = scales[preset.scale] || scales.minor;
+
+      const step16 = step % 16;
+      const bar = Math.floor(step / 16);
+      const stepDur = secondsPerStep();
+
+      const swingOffset = step16 % 2 === 1 ? stepDur * preset.swing : 0;
+      const time = rawTime + swingOffset;
+
+      const chordIndex = preset.chords[bar % preset.chords.length] || 0;
+      const chordOffset = scale[chordIndex % scale.length] || 0;
+      const baseMidi = preset.root + chordOffset;
+
+      const energy = clamp(Number(state.energy) || 0, 0, 1);
+      const power = 0.65 + energy * 0.55;
+
+      if (state.drums) {
+        if ([0, 8].includes(step16)) {
+          playKick(time, power);
+        }
+
+        if (energy > 0.48 && [6, 14].includes(step16) && rng() < 0.55) {
+          playKick(time, power * 0.75);
+        }
+
+        if ([4, 12].includes(step16)) {
+          playSnare(time, power);
+        }
+
+        if (step16 % 2 === 0 || energy > 0.72) {
+          playHat(time, power, step16 === 10 && energy > 0.55);
+        }
+      }
+
+      if (state.bass) {
+        const bassHits = energy > 0.62 ? [0, 3, 6, 8, 11, 14] : [0, 6, 8, 14];
+
+        if (bassHits.includes(step16)) {
+          const bassChoice = rng() < 0.72 ? 0 : pick([0, 2, 4]);
+          const bassMidi = baseMidi - 12 + (scale[bassChoice] || 0);
+
+          playTone({
+            time,
+            freq: midiToFreq(bassMidi),
+            dur: stepDur * (rng() < 0.3 ? 1.55 : 0.95),
+            type: preset.bassWave,
+            vol: 0.16 + energy * 0.08,
+            attack: 0.008,
+            release: 0.08,
+            filter: 520 + energy * 850,
+            q: 0.6
+          });
+        }
+      }
+
+      if (state.melody) {
+        const melodyChance = 0.13 + energy * 0.54;
+        const allowedStep = energy > 0.78 || step16 % 2 === 0 || [3, 7, 11, 15].includes(step16);
+
+        if (allowedStep && rng() < melodyChance) {
+          const degreePool = [0, 0, 1, 2, 3, 4, 5, 6];
+          const degree = (chordIndex + pick(degreePool)) % scale.length;
+          const octaveBoost = rng() < 0.22 ? 12 : 0;
+          const melodyMidi = preset.root + 24 + (scale[degree] || 0) + octaveBoost;
+
+          playTone({
+            time,
+            freq: midiToFreq(melodyMidi),
+            dur: stepDur * (0.45 + rng() * 1.15),
+            type: preset.wave,
+            vol: 0.055 + energy * 0.07,
+            attack: 0.012,
+            release: 0.09,
+            filter: 1100 + energy * 3100,
+            q: 0.9
+          });
+        }
+      }
+
+      if (step16 === 0) {
+        setStatus(`Playing: ${preset.name} | Bar ${bar + 1} | Seed: ${state.seed}`);
+      }
+    }
+
+    function scheduler() {
+      if (!isPlaying || !audioCtx) return;
+
+      while (nextNoteTime < audioCtx.currentTime + 0.14) {
+        scheduleStep(currentStep, nextNoteTime);
+        nextNoteTime += secondsPerStep();
+        currentStep += 1;
+      }
+    }
+
+    async function startMusic() {
+      ensureAudio();
+
+      if (!audioCtx) return;
+
+      try {
+        if (audioCtx.state === 'suspended') {
+          await audioCtx.resume();
+        }
+      } catch (err) {
+        setStatus('Audio belum boleh start. Tap Start sekali lagi, sumimasen~');
+        return;
+      }
+
+      rng = mulberry32(hashString(`${state.seed}|${state.preset}|lio`));
+      currentStep = 0;
+      nextNoteTime = audioCtx.currentTime + 0.06;
+      isPlaying = true;
+
+      updateAudioSettings();
+
+      if (timer) clearInterval(timer);
+      timer = setInterval(scheduler, 25);
+
+      playBtn.textContent = 'Stop';
+      setStatus(`Ikuzo~ procedural engine jalan: ${presets[state.preset].name}`);
+    }
+
+    function stopMusic() {
+      isPlaying = false;
+
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+
+      updateAudioSettings();
+      playBtn.textContent = 'Start';
+      setStatus('Stopped. Chain beat dimatiin dulu, yare-yare~');
+    }
+
+    function panicStop() {
+      isPlaying = false;
+
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+
+      if (audioCtx && master) {
+        const now = audioCtx.currentTime;
+        master.gain.cancelScheduledValues(now);
+        master.gain.setValueAtTime(0.0001, now);
+      }
+
+      playBtn.textContent = 'Start';
+      setStatus('Panic stop! Semua sound diputus, aman sayang~');
+    }
+
+    function togglePanel() {
+      state.collapsed = !state.collapsed;
+      panel.classList.toggle('lio-collapsed', state.collapsed);
+      saveState();
+    }
+
+    function placePanel() {
+      const panelWidth = panel.offsetWidth || 326;
+      const panelHeight = panel.offsetHeight || 430;
+
+      const fallbackX = window.innerWidth - panelWidth - 10;
+      const fallbackY = window.innerHeight - panelHeight - 80;
+
+      state.x = state.x === null ? fallbackX : state.x;
+      state.y = state.y === null ? fallbackY : state.y;
+
+      state.x = clamp(state.x, 6, Math.max(6, window.innerWidth - panelWidth - 6));
+      state.y = clamp(state.y, 6, Math.max(6, window.innerHeight - panelHeight - 6));
+
+      panel.style.left = `${state.x}px`;
+      panel.style.top = `${state.y}px`;
+
+      saveState();
+    }
+
+    function newSeed() {
+      const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+      let out = 'torn-';
+
+      for (let i = 0; i < 8; i++) {
+        out += chars[Math.floor(Math.random() * chars.length)];
+      }
+
+      state.seed = out;
+      seedInput.value = state.seed;
+      saveState();
+
+      if (isPlaying) {
+        rng = mulberry32(hashString(`${state.seed}|${state.preset}|lio`));
+        currentStep = 0;
+        nextNoteTime = audioCtx.currentTime + 0.05;
+      }
+
+      setStatus(`New seed: ${state.seed}. Pattern berubah, nani?!`);
+    }
+
+    function randomizeAll() {
+      const keys = Object.keys(presets);
+      state.preset = keys[Math.floor(Math.random() * keys.length)];
+      state.bpm = presets[state.preset].bpm + Math.floor(Math.random() * 17) - 8;
+      state.energy = Number((0.35 + Math.random() * 0.55).toFixed(2));
+
+      newSeed();
+
+      presetSelect.value = state.preset;
+      renderValues();
+      saveState();
+
+      if (isPlaying) {
+        rng = mulberry32(hashString(`${state.seed}|${state.preset}|lio`));
+        currentStep = 0;
+        nextNoteTime = audioCtx.currentTime + 0.05;
+      }
+
+      setStatus(`Randomized: ${presets[state.preset].name}. Chaos mode, ehehe~`);
+    }
+
+    let drag = null;
+
+    dragArea.addEventListener('pointerdown', function (event) {
+      if (event.target.closest('button, input, select')) return;
+
+      state.collapsed = false;
+      panel.classList.remove('lio-collapsed');
+
+      drag = {
+        dx: event.clientX - panel.offsetLeft,
+        dy: event.clientY - panel.offsetTop
+      };
+
+      dragArea.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+    });
+
+    dragArea.addEventListener('pointermove', function (event) {
+      if (!drag) return;
+
+      const x = clamp(
+        event.clientX - drag.dx,
+        6,
+        Math.max(6, window.innerWidth - panel.offsetWidth - 6)
+      );
+
+      const y = clamp(
+        event.clientY - drag.dy,
+        6,
+        Math.max(6, window.innerHeight - panel.offsetHeight - 6)
+      );
+
+      state.x = x;
+      state.y = y;
+
+      panel.style.left = `${x}px`;
+      panel.style.top = `${y}px`;
+    });
+
+    function endDrag() {
+      if (!drag) return;
+      drag = null;
+      saveState();
+    }
+
+    dragArea.addEventListener('pointerup', endDrag);
+    dragArea.addEventListener('pointercancel', endDrag);
+
+    handle.addEventListener('click', togglePanel);
+    toggleBtn.addEventListener('click', togglePanel);
+
+    playBtn.addEventListener('click', function () {
+      if (isPlaying) stopMusic();
+      else startMusic();
+    });
+
+    panicBtn.addEventListener('click', panicStop);
+    newSeedBtn.addEventListener('click', newSeed);
+    randomizeBtn.addEventListener('click', randomizeAll);
+
+    presetSelect.addEventListener('change', function () {
+      state.preset = presetSelect.value;
+      state.bpm = presets[state.preset].bpm;
+      renderValues();
+      saveState();
+
+      if (isPlaying && audioCtx) {
+        rng = mulberry32(hashString(`${state.seed}|${state.preset}|lio`));
+        currentStep = 0;
+        nextNoteTime = audioCtx.currentTime + 0.05;
+      }
+
+      setStatus(`Preset changed: ${presets[state.preset].name}`);
+    });
+
+    bpmInput.addEventListener('input', function () {
+      state.bpm = Number(bpmInput.value);
+      bpmValue.textContent = `${state.bpm}`;
+      saveState();
+    });
+
+    energyInput.addEventListener('input', function () {
+      state.energy = Number(energyInput.value);
+      energyValue.textContent = `${Math.round(state.energy * 100)}%`;
+      saveState();
+    });
+
+    volumeInput.addEventListener('input', function () {
+      state.volume = Number(volumeInput.value);
+      volumeValue.textContent = `${Math.round(state.volume * 100)}%`;
+      saveState();
+      updateAudioSettings();
+    });
+
+    seedInput.addEventListener('change', function () {
+      state.seed = seedInput.value.trim() || 'torn-war-777';
+      seedInput.value = state.seed;
+      saveState();
+
+      if (isPlaying && audioCtx) {
+        rng = mulberry32(hashString(`${state.seed}|${state.preset}|lio`));
+        currentStep = 0;
+        nextNoteTime = audioCtx.currentTime + 0.05;
+      }
+
+      setStatus(`Seed set: ${state.seed}`);
+    });
+
+    drumsInput.addEventListener('change', function () {
+      state.drums = drumsInput.checked;
+      saveState();
+    });
+
+    bassInput.addEventListener('change', function () {
+      state.bass = bassInput.checked;
+      saveState();
+    });
+
+    melodyInput.addEventListener('change', function () {
+      state.melody = melodyInput.checked;
+      saveState();
+    });
+
+    fxInput.addEventListener('change', function () {
+      state.fx = fxInput.checked;
+      saveState();
+      updateAudioSettings();
+    });
+
+    renderPresetOptions();
+    renderValues();
+
+    setTimeout(placePanel, 50);
+    window.addEventListener('resize', placePanel);
+
+    setStatus('Tap Start buat generate music. Mobile browser butuh gesture dulu, gomen~');
+  });
+})();
