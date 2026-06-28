@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Lio Procedural Music Synth v3 — Torn PDA
-// @namespace    qian751.torn.procedural.music.v3
-// @version      3.0.0
-// @description  Procedural music generator for Torn PDA. Song mode, themes, miniplayer, visualizer, custom genres, color picker. No URLs, all live.
+// @name         Lio Procedural Music Synth v4 — Torn PDA
+// @namespace    qian751.torn.procedural.music.v4
+// @version      4.0.0
+// @description  Procedural music generator for Torn PDA. Song mode, themes, miniplayer, visualizer, custom genres, color picker, Torn API integration. No URLs, all live.
 // @author       Qian751 (v3 rewrite)
 // @match        https://www.torn.com/*
 // @match        https://torn.com/*
@@ -34,12 +34,12 @@
 (function () {
   'use strict';
 
-  const PANEL_ID = 'lio-proc-music-v3';
-  const STYLE_ID = 'lio-proc-music-v3-style';
-  const STORE_KEY = 'lioProceduralMusicV3';
+  const PANEL_ID = 'lio-proc-music-v4';
+  const STYLE_ID = 'lio-proc-music-v4-style';
+  const STORE_KEY = 'lioProceduralMusicV4';
 
-  if (window.__lioProceduralMusicV3Loaded) return;
-  window.__lioProceduralMusicV3Loaded = true;
+  if (window.__lioProceduralMusicV4Loaded) return;
+  window.__lioProceduralMusicV4Loaded = true;
 
   // ═══════════════════════════════════════════════════════════════════════════
   // SCALES — the building blocks. each is semitones from root.
@@ -344,6 +344,19 @@
     songMode: false, songModeSpeed: 0.5,
     sleepTimer: 0, // minutes, 0 = off
     swing: 0.04,
+    // v4 additions — torn api integration
+    tornMode: false,
+    tornApiKey: '',
+    tornPollInterval: 60, // seconds between polls
+    tornMapEnergy: true,
+    tornMapNerve: true,
+    tornMapHappy: true,
+    tornMapLife: true,
+    tornMapCooldowns: true,
+    tornMapStatus: true,
+    tornMapTravel: true,
+    tornMapMoney: true,
+    tornMapIntensity: 0.7, // how strongly torn state affects params
   };
 
   function loadState() {
@@ -677,7 +690,7 @@
         <!-- ── FULL CONTENT (hidden in mini mode) ── -->
         <div class="lio-full-content">
           <div class="lio-topbar" id="lioDragBar">
-            <div class="lio-topbar-title">Lio Synth v3</div>
+            <div class="lio-topbar-title">Lio Synth v4</div>
             <div class="lio-topbar-status" id="lioTopStatus">ready</div>
             <button id="lioMiniBtn" style="padding:2px 6px;font-size:9px;min-width:24px" title="Miniplayer">▢</button>
             <button id="lioCollapseBtn" style="padding:2px 6px;font-size:9px;min-width:24px" title="Collapse">⇄</button>
@@ -690,6 +703,7 @@
             <div class="lio-tab" data-tab="genres">Genres</div>
             <div class="lio-tab" data-tab="build">Build</div>
             <div class="lio-tab" data-tab="theme">Look</div>
+            <div class="lio-tab" data-tab="live">Live</div>
           </div>
 
           <!-- ═══ PLAY TAB ═══ -->
@@ -929,6 +943,110 @@
               <div id="lioSleepStatus" style="font-size:7px;color:var(--lio-dim);margin-top:3px"></div>
             </div>
           </div>
+
+          <!-- ═══ LIVE TAB (v4 — Torn API) ═══ -->
+          <div class="lio-pane" id="lioPane-live">
+            <div class="lio-scroll">
+              <div style="font-size:9px;color:var(--lio-dim);margin-bottom:5px">
+                Connect to your Torn status. Music responds to your game state in real time.
+              </div>
+
+              <div class="lio-label" style="margin-bottom:3px">Torn API Key</div>
+              <div class="lio-row" style="margin-bottom:5px">
+                <input type="text" id="lioTornKey" placeholder="your torn api key" style="flex:1">
+                <button id="lioTornKeySaveBtn" class="lio-accent">Save</button>
+              </div>
+
+              <div class="lio-toggle-group" style="margin-bottom:6px">
+                <label class="lio-toggle" id="ltTornMode">
+                  <input type="checkbox" id="lioTornMode">
+                  <div class="lio-toggle-dot"></div>
+                  <span class="lio-toggle-label">Torn Mode</span>
+                </label>
+                <div class="lio-labeled">
+                  <div class="lio-label">Intensity</div>
+                  <select id="lioTornIntensity">
+                    <option value="0.3">Subtle</option>
+                    <option value="0.5">Medium</option>
+                    <option value="0.7">Strong</option>
+                    <option value="1.0">Full</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="lio-sep"></div>
+              <div class="lio-label" style="margin-bottom:3px">What affects the music</div>
+
+              <div class="lio-toggle-group three" style="margin-bottom:4px">
+                <label class="lio-toggle" id="ltTornEnergy">
+                  <input type="checkbox" id="lioTornMapEnergy">
+                  <div class="lio-toggle-dot"></div>
+                  <span class="lio-toggle-label">Energy</span>
+                </label>
+                <label class="lio-toggle" id="ltTornNerve">
+                  <input type="checkbox" id="lioTornMapNerve">
+                  <div class="lio-toggle-dot"></div>
+                  <span class="lio-toggle-label">Nerve</span>
+                </label>
+                <label class="lio-toggle" id="ltTornHappy">
+                  <input type="checkbox" id="lioTornMapHappy">
+                  <div class="lio-toggle-dot"></div>
+                  <span class="lio-toggle-label">Happy</span>
+                </label>
+              </div>
+              <div class="lio-toggle-group three" style="margin-bottom:4px">
+                <label class="lio-toggle" id="ltTornLife">
+                  <input type="checkbox" id="lioTornMapLife">
+                  <div class="lio-toggle-dot"></div>
+                  <span class="lio-toggle-label">Life</span>
+                </label>
+                <label class="lio-toggle" id="ltTornCd">
+                  <input type="checkbox" id="lioTornMapCooldowns">
+                  <div class="lio-toggle-dot"></div>
+                  <span class="lio-toggle-label">Cooldowns</span>
+                </label>
+                <label class="lio-toggle" id="ltTornStatus">
+                  <input type="checkbox" id="lioTornMapStatus">
+                  <div class="lio-toggle-dot"></div>
+                  <span class="lio-toggle-label">Status</span>
+                </label>
+              </div>
+              <div class="lio-toggle-group" style="margin-bottom:4px">
+                <label class="lio-toggle" id="ltTornTravel">
+                  <input type="checkbox" id="lioTornMapTravel">
+                  <div class="lio-toggle-dot"></div>
+                  <span class="lio-toggle-label">Travel</span>
+                </label>
+                <label class="lio-toggle" id="ltTornMoney">
+                  <input type="checkbox" id="lioTornMapMoney">
+                  <div class="lio-toggle-dot"></div>
+                  <span class="lio-toggle-label">Money</span>
+                </label>
+              </div>
+
+              <div class="lio-sep"></div>
+              <div class="lio-label" style="margin-bottom:3px">Current Status</div>
+              <div id="lioTornStatus" style="font-size:9px;color:var(--lio-dim);min-height:60px;padding:5px;background:rgba(128,128,128,0.05);border-radius:6px;border:1px solid rgba(128,128,128,0.08)">
+                <div style="color:var(--lio-dim)">not connected. add your api key above.</div>
+              </div>
+
+              <div class="lio-sep"></div>
+              <div style="font-size:8px;color:var(--lio-dim);line-height:1.4">
+                <b style="color:var(--lio-accent)">How it works:</b><br>
+                Energy -> song energy (more energy = more intense)<br>
+                Nerve -> melody density (high nerve = busier lead)<br>
+                Happy -> filter cutoff (happier = brighter)<br>
+                Life -> bass weight (low life = darker)<br>
+                Drug CD -> reverb swell + slower tempo<br>
+                Medical CD -> dampened highs<br>
+                Booster CD -> tempo boost + swing<br>
+                Jail -> sparse drums, minor key<br>
+                Hospital -> ambient, no drums<br>
+                Flying -> reverb + delay swell<br>
+                Cash -> tempo + brightness
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- ── MINI PLAYER CONTENT ── -->
@@ -1026,6 +1144,199 @@
     // song mode state — target values that we lerp toward
     let songTargets = {};
     let songPhase = 0;
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // TORN API INTEGRATION (v4)
+    // ═══════════════════════════════════════════════════════════════════════════
+    let tornData = {
+      energy: { current: 100, maximum: 100 },
+      nerve: { current: 20, maximum: 25 },
+      happy: { current: 3000, maximum: 3000 },
+      life: { current: 1000, maximum: 1000 },
+      cooldowns: { drug: 0, medical: 0, booster: 0 },
+      status: { state: 'Okay', description: 'Okay' },
+      travel: { time_left: 0, destination: 'Torn' },
+      money: { wallet: 0, bank: 0, total: 0 },
+    };
+    let tornPollTimer = null;
+    let tornLastPoll = 0;
+
+    async function fetchTornData() {
+      if (!state.tornApiKey || !state.tornMode) return;
+      const now = Date.now();
+      if (now - tornLastPoll < (state.tornPollInterval || 60) * 1000) return;
+      tornLastPoll = now;
+
+      const key = state.tornApiKey;
+      const selections = ['bars', 'cooldowns', 'travel', 'profile', 'networth'];
+      const url = `https://api.torn.com/user/?selections=${selections.join(',')}&key=${key}&comment=LioSynth`;
+
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        if (data.error) {
+          if (data.error.code === 2) setStatus('torn: invalid api key');
+          else if (data.error.code === 5) setStatus('torn: rate limited');
+          else setStatus('torn: ' + (data.error.error || 'error'));
+          return;
+        }
+
+        if (data.bars) {
+          tornData.energy = data.bars.energy || tornData.energy;
+          tornData.nerve = data.bars.nerve || tornData.nerve;
+          tornData.happy = data.bars.happy || tornData.happy;
+          tornData.life = data.bars.life || tornData.life;
+        }
+        if (data.cooldowns) tornData.cooldowns = data.cooldowns;
+        if (data.travel) tornData.travel = data.travel;
+        if (data.profile) tornData.status = data.profile.status || tornData.status;
+        if (data.networth) tornData.money = {
+          wallet: data.networth.wallet || 0,
+          bank: data.networth.bank || 0,
+          total: data.networth.total || 0,
+        };
+
+        updateTornStatusUI();
+        applyTornToMusic();
+      } catch (err) {
+        setStatus('torn: fetch failed');
+      }
+    }
+
+    function updateTornStatusUI() {
+      const el = panel.querySelector('#lioTornStatus');
+      if (!el) return;
+      const d = tornData;
+      const energyPct = Math.round((d.energy.current / d.energy.maximum) * 100);
+      const nervePct = Math.round((d.nerve.current / d.nerve.maximum) * 100);
+      const happyPct = Math.round((d.happy.current / d.happy.maximum) * 100);
+      const lifePct = Math.round((d.life.current / d.life.maximum) * 100);
+      const statusColor = d.status.state === 'Okay' ? 'var(--lio-accent)' :
+                          d.status.state === 'Hospital' ? '#ff8080' :
+                          d.status.state === 'Jail' ? '#ffa040' :
+                          d.status.state === 'Traveling' ? '#80c0ff' : 'var(--lio-text)';
+
+      el.innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:3px">' +
+        '<div>Status: <b style="color:' + statusColor + '">' + d.status.state + '</b></div>' +
+        '<div>Travel: ' + (d.travel.time_left > 0 ? 'flying (' + d.travel.destination + ')' : 'grounded') + '</div>' +
+        '<div>Energy: <span style="color:var(--lio-accent)">' + energyPct + '%</span></div>' +
+        '<div>Nerve: <span style="color:var(--lio-accent)">' + nervePct + '%</span></div>' +
+        '<div>Happy: <span style="color:var(--lio-accent)">' + happyPct + '%</span></div>' +
+        '<div>Life: <span style="color:var(--lio-accent)">' + lifePct + '%</span></div>' +
+        '<div>Drug CD: ' + (d.cooldowns.drug > 0 ? Math.ceil(d.cooldowns.drug / 60) + 'm' : 'none') + '</div>' +
+        '<div>Med CD: ' + (d.cooldowns.medical > 0 ? Math.ceil(d.cooldowns.medical / 60) + 'm' : 'none') + '</div>' +
+        '<div>Booster CD: ' + (d.cooldowns.booster > 0 ? Math.ceil(d.cooldowns.booster / 60) + 'm' : 'none') + '</div>' +
+        '<div>Cash: $' + (d.money.wallet / 1e6).toFixed(1) + 'M</div>' +
+        '</div>';
+    }
+
+    function applyTornToMusic() {
+      if (!state.tornMode || !isPlaying) return;
+      const intensity = state.tornMapIntensity || 0.7;
+      const d = tornData;
+
+      if (state.tornMapEnergy) {
+        const e = d.energy.current / d.energy.maximum;
+        state.energy = clamp(state.energy * 0.7 + e * 0.3 * intensity + state.energy * (1 - intensity) * 0.7, 0, 1);
+      }
+      if (state.tornMapNerve) {
+        const n = d.nerve.current / d.nerve.maximum;
+        state.melodyDensity = clamp(state.melodyDensity * 0.7 + n * 0.3 * intensity, 0, 1);
+      }
+      if (state.tornMapHappy) {
+        const h = d.happy.current / d.happy.maximum;
+        state.filterCutoff = clamp(state.filterCutoff * 0.7 + h * 0.3 * intensity, 0, 1);
+      }
+      if (state.tornMapLife) {
+        const l = d.life.current / d.life.maximum;
+        state.bassIntensity = clamp(state.bassIntensity * 0.7 + (1.3 - l) * 0.3 * intensity, 0, 1);
+        if (l < 0.3) state.filterCutoff = clamp(state.filterCutoff * 0.9, 0.05, 1);
+      }
+      if (state.tornMapCooldowns) {
+        if (d.cooldowns.drug > 0) {
+          state.reverbWet = clamp(state.reverbWet * 0.8 + 0.5 * 0.2 * intensity, 0, 0.8);
+          state.bpm = Math.max(50, state.bpm - 0.1);
+        }
+        if (d.cooldowns.medical > 0) {
+          state.eqHigh = clamp(state.eqHigh * 0.8 + 0.2 * 0.2, 0, 1);
+          state.eqAir = clamp(state.eqAir * 0.8 + 0.2 * 0.2, 0, 1);
+        }
+        if (d.cooldowns.booster > 0) {
+          state.bpm = Math.min(200, state.bpm + 0.15);
+          state.swing = clamp(state.swing * 0.8 + 0.15 * 0.2 * intensity, 0, 0.4);
+        }
+      }
+      if (tornMapStatus(d, intensity)) return;
+      if (state.tornMapTravel && d.travel.time_left > 0) {
+        state.reverbWet = clamp(state.reverbWet * 0.8 + 0.45 * 0.2 * intensity, 0, 0.7);
+        state.fx = true;
+      }
+      if (state.tornMapMoney) {
+        const cashM = d.money.wallet / 1e6;
+        if (cashM > 5) {
+          state.bpm = Math.min(180, state.bpm + 0.05);
+          state.filterCutoff = clamp(state.filterCutoff * 0.9 + 0.6 * 0.1 * intensity, 0, 1);
+        } else if (cashM < 0.1) {
+          state.bpm = Math.max(60, state.bpm - 0.05);
+        }
+      }
+
+      updateAudio();
+      updateEq();
+      syncTornSlidersToUI();
+    }
+
+    function tornMapStatus(d, intensity) {
+      const s = d.status.state;
+      if (s === 'Jail') {
+        state.drums = true;
+        state.bpm = Math.max(60, state.bpm * 0.95);
+        state.melodyDensity = clamp(state.melodyDensity * 0.8, 0, 0.4);
+        state.reverbWet = clamp(state.reverbWet * 0.8 + 0.3 * 0.2, 0, 0.6);
+        if (state.drumPattern !== 'sparse') {
+          state.drumPattern = 'sparse';
+          livePattern = JSON.parse(JSON.stringify(drumPatterns.sparse));
+          buildSeqRows();
+        }
+        return true;
+      }
+      if (s === 'Hospital') {
+        state.drums = false;
+        state.reverbWet = clamp(state.reverbWet * 0.7 + 0.6 * 0.3 * intensity, 0, 0.8);
+        state.bpm = Math.max(50, state.bpm * 0.97);
+        return true;
+      }
+      return false;
+    }
+
+    function syncTornSlidersToUI() {
+      const e1 = panel.querySelector('#lioEnergy');
+      if (e1) { e1.value = state.energy; panel.querySelector('#lioEnergyVal').textContent = Math.round(state.energy * 100) + '%'; }
+      const e2 = panel.querySelector('#lioFilter');
+      if (e2) { e2.value = state.filterCutoff; panel.querySelector('#lioFilterVal').textContent = Math.round(state.filterCutoff * 100) + '%'; }
+      const e3 = panel.querySelector('#lioRevWet');
+      if (e3) { e3.value = state.reverbWet; panel.querySelector('#lioRevVal').textContent = Math.round(state.reverbWet * 100) + '%'; }
+      const e4 = panel.querySelector('#lioBassInt');
+      if (e4) { e4.value = state.bassIntensity; panel.querySelector('#lioBassIntVal').textContent = Math.round(state.bassIntensity * 100) + '%'; }
+      const e5 = panel.querySelector('#lioMelDens');
+      if (e5) { e5.value = state.melodyDensity; panel.querySelector('#lioMelDensVal').textContent = Math.round(state.melodyDensity * 100) + '%'; }
+      const e6 = panel.querySelector('#lioBpm');
+      if (e6) { e6.value = state.bpm; panel.querySelector('#lioBpmVal').textContent = Math.round(state.bpm); }
+      const e7 = panel.querySelector('#lioSwing');
+      if (e7) { e7.value = state.swing; panel.querySelector('#lioSwingVal').textContent = Math.round(state.swing * 100) + '%'; }
+    }
+
+    function startTornPolling() {
+      stopTornPolling();
+      if (!state.tornMode || !state.tornApiKey) return;
+      fetchTornData();
+      tornPollTimer = setInterval(fetchTornData, (state.tornPollInterval || 60) * 1000);
+    }
+
+    function stopTornPolling() {
+      if (tornPollTimer) { clearInterval(tornPollTimer); tornPollTimer = null; }
+    }
 
     function setStatus(txt) {
       statusEl.textContent = txt;
@@ -1744,6 +2055,7 @@
         if (tab.dataset.tab === 'genres') buildPresetCards();
         if (tab.dataset.tab === 'build') buildCustomList();
         if (tab.dataset.tab === 'theme') buildThemeSwatches();
+        if (tab.dataset.tab === 'live') updateTornStatusUI();
         saveState();
       });
     });
@@ -2054,6 +2366,78 @@
     });
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // LIVE TAB BINDINGS (v4 — Torn API)
+    // ═══════════════════════════════════════════════════════════════════════════
+    const tornKeyInput = el('#lioTornKey');
+    const tornKeySaveBtn = el('#lioTornKeySaveBtn');
+    const tornModeChk = el('#lioTornMode');
+    const tornIntensitySel = el('#lioTornIntensity');
+    const tornMapEnergyChk = el('#lioTornMapEnergy');
+    const tornMapNerveChk = el('#lioTornMapNerve');
+    const tornMapHappyChk = el('#lioTornMapHappy');
+    const tornMapLifeChk = el('#lioTornMapLife');
+    const tornMapCooldownsChk = el('#lioTornMapCooldowns');
+    const tornMapStatusChk = el('#lioTornMapStatus');
+    const tornMapTravelChk = el('#lioTornMapTravel');
+    const tornMapMoneyChk = el('#lioTornMapMoney');
+
+    // populate existing values
+    tornKeyInput.value = state.tornApiKey || '';
+    tornModeChk.checked = state.tornMode;
+    tornIntensitySel.value = String(state.tornMapIntensity || 0.7);
+    tornMapEnergyChk.checked = state.tornMapEnergy;
+    tornMapNerveChk.checked = state.tornMapNerve;
+    tornMapHappyChk.checked = state.tornMapHappy;
+    tornMapLifeChk.checked = state.tornMapLife;
+    tornMapCooldownsChk.checked = state.tornMapCooldowns;
+    tornMapStatusChk.checked = state.tornMapStatus;
+    tornMapTravelChk.checked = state.tornMapTravel;
+    tornMapMoneyChk.checked = state.tornMapMoney;
+
+    // update toggle visuals
+    ['ltTornMode','ltTornEnergy','ltTornNerve','ltTornHappy','ltTornLife','ltTornCd','ltTornStatus','ltTornTravel','ltTornMoney'].forEach(id => {
+      const lbl = el('#' + id);
+      const chk = lbl?.querySelector('input');
+      if (lbl && chk) lbl.classList.toggle('on', chk.checked);
+    });
+
+    tornKeySaveBtn.addEventListener('click', () => {
+      state.tornApiKey = tornKeyInput.value.trim();
+      saveState();
+      setStatus('key saved');
+      if (state.tornMode) startTornPolling();
+    });
+
+    function bindTornToggle(labelId, checkbox, stateKey) {
+      const lbl = el('#' + labelId);
+      if (!lbl || !checkbox) return;
+      lbl.addEventListener('click', () => {
+        checkbox.checked = !checkbox.checked;
+        state[stateKey] = checkbox.checked;
+        lbl.classList.toggle('on', checkbox.checked);
+        saveState();
+      });
+    }
+
+    bindTornToggle('ltTornMode', tornModeChk, 'tornMode');
+    bindTornToggle('ltTornEnergy', tornMapEnergyChk, 'tornMapEnergy');
+    bindTornToggle('ltTornNerve', tornMapNerveChk, 'tornMapNerve');
+    bindTornToggle('ltTornHappy', tornMapHappyChk, 'tornMapHappy');
+    bindTornToggle('ltTornLife', tornMapLifeChk, 'tornMapLife');
+    bindTornToggle('ltTornCd', tornMapCooldownsChk, 'tornMapCooldowns');
+    bindTornToggle('ltTornStatus', tornMapStatusChk, 'tornMapStatus');
+    bindTornToggle('ltTornTravel', tornMapTravelChk, 'tornMapTravel');
+    bindTornToggle('ltTornMoney', tornMapMoneyChk, 'tornMapMoney');
+
+    tornIntensitySel.addEventListener('change', () => {
+      state.tornMapIntensity = Number(tornIntensitySel.value);
+      saveState();
+    });
+
+    // start polling if already enabled
+    if (state.tornMode && state.tornApiKey) startTornPolling();
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // PLACE PANEL — position on screen
     // ═══════════════════════════════════════════════════════════════════════════
     function placePanel() {
@@ -2082,7 +2466,7 @@
       buildSeqRows();
     }
 
-    setStatus('v3 ready · tap START');
+    setStatus('v4 ready · tap START');
 
   }); // end ready/init
 })(); // end IIFE
