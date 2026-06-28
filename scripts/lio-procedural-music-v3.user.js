@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lio Procedural Music Synth v3 — Torn PDA
 // @namespace    qian751.torn.procedural.music.v3
-// @version      3.0.0
+// @version      3.1.0
 // @description  Procedural music synth — themes, miniplayer, song mode (LFO modulation), visualizer, custom genres, step sequencer.
 // @author       Qian751
 // @match        https://www.torn.com/*
@@ -586,6 +586,41 @@
       #${MINI_ID} .mini-expand {
         font-size:9px; color:var(--lio-text-dim,#6060a0); padding:0 2px; flex-shrink:0;
       }
+
+      /* ── TRIGGER BUTTON ── */
+      #lio-trigger {
+        position:fixed; z-index:9999999;
+        bottom:20px; left:20px;
+        width:38px; height:38px; border-radius:50%;
+        background:linear-gradient(135deg,#ff40b0,#8040ff,#4080ff);
+        border:none; cursor:pointer; outline:none;
+        box-shadow:0 3px 14px rgba(0,0,0,0.5), 0 0 0 2px rgba(255,255,255,0.1);
+        display:flex; align-items:center; justify-content:center;
+        font-size:16px; transition:transform 0.15s, box-shadow 0.15s;
+        user-select:none;
+      }
+      #lio-trigger:hover {
+        transform:scale(1.1);
+        box-shadow:0 4px 18px rgba(140,60,255,0.5), 0 0 0 2px rgba(255,255,255,0.2);
+      }
+      #lio-trigger.playing {
+        animation:lio-trigger-pulse 1.2s ease-in-out infinite;
+      }
+      @keyframes lio-trigger-pulse {
+        0%,100%{ box-shadow:0 3px 14px rgba(0,0,0,0.5), 0 0 0 2px rgba(255,100,200,0.4); }
+        50%{     box-shadow:0 3px 22px rgba(180,60,255,0.7), 0 0 0 3px rgba(255,100,200,0.7); }
+      }
+      #lio-trigger-tip {
+        position:fixed; z-index:9999998;
+        bottom:64px; left:16px;
+        background:rgba(10,10,20,0.92); color:#c0c0e0;
+        font-size:9px; font-family:ui-monospace,monospace;
+        padding:4px 8px; border-radius:6px;
+        border:1px solid rgba(255,255,255,0.1);
+        white-space:nowrap; pointer-events:none;
+        opacity:0; transition:opacity 0.2s;
+      }
+      #lio-trigger:hover + #lio-trigger-tip { opacity:1; }
     `;
     document.head.appendChild(s);
   }
@@ -893,6 +928,18 @@
       <span class="mini-expand">⊞</span>
     `;
     document.body.appendChild(mini);
+
+    // ── TRIGGER BUTTON (always visible, opens/closes panel) ──────────────────
+    const trigBtn = document.createElement('button');
+    trigBtn.id = 'lio-trigger';
+    trigBtn.title = 'Lio Synth (Alt+M)';
+    trigBtn.textContent = '♬';
+    const trigTip = document.createElement('div');
+    trigTip.id = 'lio-trigger-tip';
+    trigTip.textContent = 'Lio Synth · Alt+M';
+    document.body.appendChild(trigBtn);
+    document.body.appendChild(trigTip);
+
 
     // ── DOM REFS ─────────────────────────────────────────────────────────────
     const $ = id => panel.querySelector('#'+id);
@@ -1916,9 +1963,52 @@
 
     // ── INIT ─────────────────────────────────────────────────────────────────
     buildPresetSel(); renderAll(); buildCustomList(); buildCards();
-    setTimeout(placePanel,60); placeMini();
+    // Position immediately so panel is never invisible on load
+    panel.style.left = (window.innerWidth - 368) + 'px';
+    panel.style.top  = '60px';
+    setTimeout(placePanel, 80);
+    placeMini();
     window.addEventListener('resize',placePanel);
     applyTheme(state.theme||'default');
+
+    // Wire trigger button
+    trigBtn.addEventListener('click', () => {
+      const isHidden = state.collapsed;
+      state.collapsed = !isHidden;
+      panel.classList.toggle('collapsed', state.collapsed);
+      if (!state.collapsed) placePanel();
+      saveState();
+    });
+
+    // Sync trigger glow with playing state
+    const origStart = startMusic;
+    // Update trigger on play/stop via MutationObserver on playBtn class
+    const trigSync = () => {
+      trigBtn.classList.toggle('playing', playBtn.classList.contains('playing'));
+    };
+    new MutationObserver(trigSync).observe(playBtn, { attributes: true, attributeFilter: ['class'] });
+
+    // ── HOTKEY: Alt+M toggles panel ──────────────────────────────────────────
+    document.addEventListener('keydown', e => {
+      if (e.altKey && (e.key === 'm' || e.key === 'M')) {
+        e.preventDefault();
+        state.collapsed = !state.collapsed;
+        panel.classList.toggle('collapsed', state.collapsed);
+        if (!state.collapsed) placePanel();
+        saveState();
+      }
+      // Alt+P = play/stop
+      if (e.altKey && (e.key === 'p' || e.key === 'P')) {
+        e.preventDefault();
+        playing ? stopMusic() : startMusic();
+      }
+      // Alt+S = new seed
+      if (e.altKey && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        newSeedB.click();
+      }
+    });
+
 
     if(state._customPat&&state.drumPattern==='_custom'){
       livePat=JSON.parse(JSON.stringify(state._customPat)); buildSeqRows();
@@ -1927,6 +2017,6 @@
     miniName.textContent=(allPresets()[state.preset]||{}).name||'?';
     mini.style.display='flex';
 
-    setStatus('Tap ▶ START · v3.0');
+    setStatus('Tap ▶ START · Alt+M to toggle · v3.1');
   });
 })();
