@@ -1,2472 +1,1932 @@
 // ==UserScript==
-// @name         Lio Procedural Music Synth v4 — Torn PDA
-// @namespace    qian751.torn.procedural.music.v4
-// @version      4.0.0
-// @description  Procedural music generator for Torn PDA. Song mode, themes, miniplayer, visualizer, custom genres, color picker, Torn API integration. No URLs, all live.
-// @author       Qian751 (v3 rewrite)
+// @name         Lio Procedural Music Synth v3 — Torn PDA
+// @namespace    qian751.torn.procedural.music.v3
+// @version      3.0.0
+// @description  Procedural music synth — themes, miniplayer, song mode (LFO modulation), visualizer, custom genres, step sequencer.
+// @author       Qian751
 // @match        https://www.torn.com/*
 // @match        https://torn.com/*
 // @run-at       document-end
 // @grant        none
-// @downloadURL https://update.greasyfork.org/scripts/584693/Procedural%20Music%20Synth%20Panel%20for%20Torn%20PDA.user.js
-// @updateURL https://update.greasyfork.org/scripts/584693/Procedural%20Music%20Synth%20Panel%20for%20Torn%20PDA.meta.js
 // ==/UserScript==
-
-/*
- *  Lio Proc Synth v3
- *  -----------------
- *  v1 had charm but no features.
- *  v2 had features but no charm.
- *  v3 is me trying to get both.
- *
- *  New in v3:
- *    - Song mode: knobs drift on their own over time (like mynoise.net)
- *    - Themes: matrix, oldschool, torn, ocean, lava, custom color picker
- *    - Miniplayer: collapsed strip still shows viz + controls
- *    - Better visualizer: bars, waveform, circular, or off
- *    - 16 built-in genres (up from 12)
- *    - Sleep timer with fade-out
- *    - "Jam" button: nudges one random parameter for happy accidents
- *    - Export/import custom genres as JSON
- *    - Comments that sound like a person wrote them at 2am
- */
 
 (function () {
   'use strict';
 
-  const PANEL_ID = 'lio-proc-music-v4';
-  const STYLE_ID = 'lio-proc-music-v4-style';
-  const STORE_KEY = 'lioProceduralMusicV4';
+  const PANEL_ID  = 'lio-synth-v3';
+  const MINI_ID   = 'lio-synth-v3-mini';
+  const STYLE_ID  = 'lio-synth-v3-style';
+  const STORE_KEY = 'lioSynthV3';
 
-  if (window.__lioProceduralMusicV4Loaded) return;
-  window.__lioProceduralMusicV4Loaded = true;
+  if (window.__lioSynthV3) return;
+  window.__lioSynthV3 = true;
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // SCALES — the building blocks. each is semitones from root.
-  // ═══════════════════════════════════════════════════════════════════════════
-  const scales = {
-    minor:      [0, 2, 3, 5, 7, 8, 10, 12],
-    major:      [0, 2, 4, 5, 7, 9, 11, 12],
-    dark:       [0, 1, 3, 5, 7, 8, 10, 12],
-    pentatonic: [0, 3, 5, 7, 10, 12, 15, 17],
-    dorian:     [0, 2, 3, 5, 7, 9, 10, 12],
-    phrygian:   [0, 1, 3, 5, 7, 8, 10, 12],
-    lydian:     [0, 2, 4, 6, 7, 9, 11, 12],
-    mixolydian: [0, 2, 4, 5, 7, 9, 10, 12],
-    blues:      [0, 3, 5, 6, 7, 10, 12, 15],
-    wholetone:  [0, 2, 4, 6, 8, 10, 12, 14],
-    chromatic:  [0, 1, 2, 3, 4, 5, 6, 7],
-    japanese:   [0, 1, 5, 7, 8, 12, 13, 17],
-    arabic:     [0, 1, 4, 5, 7, 8, 11, 12],
-    flamenco:   [0, 1, 4, 5, 7, 8, 11, 12],
-    hungarian:  [0, 2, 3, 6, 7, 8, 11, 12],
-    enigmatic:  [0, 1, 4, 6, 8, 10, 11, 12],
+  // ── SCALES ──────────────────────────────────────────────────────────────────
+  const SCALES = {
+    minor:      [0,2,3,5,7,8,10,12],
+    major:      [0,2,4,5,7,9,11,12],
+    dark:       [0,1,3,5,7,8,10,12],
+    pentatonic: [0,3,5,7,10,12,15,17],
+    dorian:     [0,2,3,5,7,9,10,12],
+    phrygian:   [0,1,3,5,7,8,10,12],
+    lydian:     [0,2,4,6,7,9,11,12],
+    mixolydian: [0,2,4,5,7,9,10,12],
+    blues:      [0,3,5,6,7,10,12,15],
+    wholetone:  [0,2,4,6,8,10,12,14],
+    japanese:   [0,1,5,7,8,12,13,17],
+  };
+  const SCALE_NAMES = {
+    minor:'Minor', major:'Major', dark:'Dark', pentatonic:'Pentatonic',
+    dorian:'Dorian', phrygian:'Phrygian', lydian:'Lydian',
+    mixolydian:'Mixolydian', blues:'Blues', wholetone:'Whole Tone', japanese:'Japanese'
   };
 
-  const scaleNames = {
-    minor: 'Minor', major: 'Major', dark: 'Dark', pentatonic: 'Pentatonic',
-    dorian: 'Dorian', phrygian: 'Phrygian', lydian: 'Lydian', mixolydian: 'Mixolydian',
-    blues: 'Blues', wholetone: 'Whole Tone', chromatic: 'Chromatic', japanese: 'Japanese',
-    arabic: 'Arabic', flamenco: 'Flamenco', hungarian: 'Hungarian', enigmatic: 'Enigmatic',
+  // ── BUILT-IN PRESETS ────────────────────────────────────────────────────────
+  const PRESETS = {
+    neonwar:     { name:'Neon War Chain',      root:45, scale:'minor',      wave:'sawtooth', bassWave:'square',   bpm:124, swing:0.04, chords:[0,5,3,6], rev:0.18, filter:0.5,  arp:false, chord:true,  drum:'standard', bassInt:0.7, melDens:0.5, genre:'cyberpunk' },
+    island:      { name:'Private Island Chill',root:48, scale:'major',      wave:'triangle', bassWave:'sine',     bpm:88,  swing:0.08, chords:[0,4,5,3], rev:0.3,  filter:0.65, arp:false, chord:false, drum:'half',     bassInt:0.5, melDens:0.4, genre:'lofi' },
+    bazaar:      { name:'Bazaar Panic',         root:42, scale:'dark',       wave:'square',   bassWave:'sawtooth', bpm:138, swing:0.02, chords:[0,2,5,1], rev:0.1,  filter:0.55, arp:true,  chord:false, drum:'standard', bassInt:0.8, melDens:0.6, genre:'electronic' },
+    stealth:     { name:'Stealth Hospital Run', root:43, scale:'dark',       wave:'sine',     bassWave:'triangle', bpm:104, swing:0.12, chords:[0,1,3,2], rev:0.45, filter:0.35, arp:false, chord:false, drum:'sparse',   bassInt:0.4, melDens:0.25,genre:'ambient' },
+    lofi_beats:  { name:'Lo-Fi Study Hall',     root:50, scale:'dorian',     wave:'triangle', bassWave:'sine',     bpm:75,  swing:0.14, chords:[0,3,4,5], rev:0.38, filter:0.45, arp:false, chord:true,  drum:'lofi',     bassInt:0.45,melDens:0.3, genre:'lofi' },
+    synthwave:   { name:'Retrowave Highway',    root:45, scale:'minor',      wave:'sawtooth', bassWave:'sawtooth', bpm:116, swing:0.0,  chords:[0,5,3,7], rev:0.25, filter:0.7,  arp:true,  chord:true,  drum:'disco',    bassInt:0.75,melDens:0.55,genre:'synthwave' },
+    jazz:        { name:'Back Alley Jazz',      root:53, scale:'dorian',     wave:'sine',     bassWave:'triangle', bpm:95,  swing:0.2,  chords:[0,2,4,1], rev:0.35, filter:0.55, arp:false, chord:true,  drum:'jazz',     bassInt:0.55,melDens:0.65,genre:'jazz' },
+    trap:        { name:'Faction Trap Drop',    root:41, scale:'minor',      wave:'sawtooth', bassWave:'sine',     bpm:140, swing:0.0,  chords:[0,0,5,3], rev:0.15, filter:0.6,  arp:false, chord:false, drum:'trap',     bassInt:0.9, melDens:0.2, genre:'trap' },
+    ambient:     { name:'Offshore Drone',       root:48, scale:'lydian',     wave:'sine',     bassWave:'sine',     bpm:60,  swing:0.0,  chords:[0,4,2,6], rev:0.65, filter:0.3,  arp:false, chord:true,  drum:'none',     bassInt:0.25,melDens:0.2, genre:'ambient' },
+    blues_rock:  { name:'Torn Street Blues',    root:45, scale:'blues',      wave:'sawtooth', bassWave:'square',   bpm:100, swing:0.1,  chords:[0,3,0,4], rev:0.2,  filter:0.65, arp:false, chord:false, drum:'rock',     bassInt:0.7, melDens:0.6, genre:'blues' },
+    city_pop:    { name:'City Pop Nights',      root:52, scale:'japanese',   wave:'triangle', bassWave:'sine',     bpm:102, swing:0.06, chords:[0,4,2,5], rev:0.3,  filter:0.6,  arp:true,  chord:false, drum:'standard', bassInt:0.55,melDens:0.5, genre:'citypop' },
+    dungeon:     { name:'Dungeon Raid',         root:40, scale:'phrygian',   wave:'square',   bassWave:'sawtooth', bpm:150, swing:0.0,  chords:[0,1,3,0], rev:0.12, filter:0.8,  arp:true,  chord:false, drum:'metal',    bassInt:0.85,melDens:0.45,genre:'metal' },
   };
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // DRUM PATTERNS — 16 steps each. 1 = hit, 0 = rest.
-  // ═══════════════════════════════════════════════════════════════════════════
-  const drumPatterns = {
+  // ── DRUM PATTERNS ───────────────────────────────────────────────────────────
+  const DRUM_PATTERNS = {
     standard: { kick:[1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0], snare:[0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0], hat:[1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0], ohat:[0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0] },
-    lofi:      { kick:[1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0], snare:[0,0,0,0,1,0,0,1,0,0,0,0,1,0,0,0], hat:[1,0,1,1,0,1,1,0,1,1,0,1,0,1,0,0], ohat:[0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0] },
-    trap:      { kick:[1,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0], snare:[0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0], hat:[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1], ohat:[0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0] },
-    jazz:      { kick:[1,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0], snare:[0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0], hat:[1,0,0,1,0,1,0,0,1,0,0,1,0,1,0,0], ohat:[0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0] },
-    disco:     { kick:[1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0], snare:[0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0], hat:[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1], ohat:[0,0,0,1,0,0,0,1,0,0,0,1,0,0,0,1] },
-    rock:      { kick:[1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0], snare:[0,0,0,0,1,0,0,0,0,0,0,0,1,0,1,0], hat:[1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0], ohat:[0,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0] },
-    metal:     { kick:[1,0,1,1,0,0,1,0,1,1,0,0,1,0,1,0], snare:[0,0,0,0,1,0,0,1,0,0,0,0,1,0,0,1], hat:[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1], ohat:[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] },
-    half:      { kick:[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], snare:[0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0], hat:[1,0,0,1,0,0,1,0,1,0,0,1,0,0,1,0], ohat:[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] },
-    sparse:    { kick:[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], snare:[0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0], hat:[0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0], ohat:[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] },
-    breakbeat: { kick:[1,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0], snare:[0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,1], hat:[1,0,1,0,1,1,0,1,0,1,0,1,1,0,1,0], ohat:[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1] },
-    reggaeton: { kick:[1,0,0,0,0,0,1,0,1,0,0,0,0,0,1,0], snare:[0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0], hat:[1,1,0,1,1,1,0,1,1,1,0,1,1,1,0,1], ohat:[0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0] },
-    none:      { kick:[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], snare:[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], hat:[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], ohat:[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] },
+    lofi:     { kick:[1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0], snare:[0,0,0,0,1,0,0,1,0,0,0,0,1,0,0,0], hat:[1,0,1,1,0,1,1,0,1,1,0,1,0,1,0,0], ohat:[0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0] },
+    trap:     { kick:[1,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0], snare:[0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0], hat:[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1], ohat:[0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0] },
+    jazz:     { kick:[1,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0], snare:[0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0], hat:[1,0,0,1,0,1,0,0,1,0,0,1,0,1,0,0], ohat:[0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0] },
+    disco:    { kick:[1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0], snare:[0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0], hat:[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1], ohat:[0,0,0,1,0,0,0,1,0,0,0,1,0,0,0,1] },
+    rock:     { kick:[1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0], snare:[0,0,0,0,1,0,0,0,0,0,0,0,1,0,1,0], hat:[1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0], ohat:[0,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0] },
+    metal:    { kick:[1,0,1,1,0,0,1,0,1,1,0,0,1,0,1,0], snare:[0,0,0,0,1,0,0,1,0,0,0,0,1,0,0,1], hat:[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1], ohat:[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] },
+    half:     { kick:[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], snare:[0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0], hat:[1,0,0,1,0,0,1,0,1,0,0,1,0,0,1,0], ohat:[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] },
+    sparse:   { kick:[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], snare:[0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0], hat:[0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0], ohat:[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] },
+    none:     { kick:[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], snare:[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], hat:[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], ohat:[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] },
   };
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // CHORD VOICINGS — which scale degrees to stack
-  // ═══════════════════════════════════════════════════════════════════════════
-  const chordVoicings = {
-    triad:   [0, 2, 4],
-    seventh: [0, 2, 4, 6],
-    sus2:    [0, 1, 4],
-    sus4:    [0, 3, 4],
-    power:   [0, 4],
-    shell:   [0, 2, 6],
-    ninth:   [0, 2, 4, 6, 8],
-    add9:    [0, 2, 4, 8],
+  const CHORD_VOICINGS = {
+    triad:[0,2,4], seventh:[0,2,4,6], sus2:[0,1,4], sus4:[0,3,4], power:[0,4], shell:[0,2,6]
   };
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // THEMES — color schemes. the big new thing in v3.
-  // each theme defines: bg, panel bg, border, text, accent, accent2, viz gradient
-  // ═══════════════════════════════════════════════════════════════════════════
-  const themes = {
+  const GENRE_ICONS = {
+    cyberpunk:'🔮', lofi:'☕', electronic:'⚡', ambient:'🌊', synthwave:'🌆',
+    jazz:'🎷', trap:'🔊', blues:'🎸', citypop:'🌸', metal:'💀', custom:'🎨', default:'🎵'
+  };
+
+  // ── THEMES ──────────────────────────────────────────────────────────────────
+  const THEMES = {
+    default: {
+      name: 'Default',
+      '--lio-bg':          'rgba(10,10,18,0.96)',
+      '--lio-border':      'rgba(200,160,255,0.18)',
+      '--lio-accent1':     '#ff60c0',
+      '--lio-accent2':     '#a060ff',
+      '--lio-accent3':     '#60a0ff',
+      '--lio-handle-a':    '#ff3cb4',
+      '--lio-handle-b':    '#8c3cff',
+      '--lio-handle-c':    '#3c8cff',
+      '--lio-text':        '#e0e0f0',
+      '--lio-text-dim':    '#6868a0',
+      '--lio-tab-active-bg': 'rgba(180,80,255,0.2)',
+      '--lio-tab-active-border': 'rgba(180,80,255,0.5)',
+      '--lio-tab-active-color': '#d090ff',
+      '--lio-btn-play-bg': 'linear-gradient(135deg,rgba(255,60,180,0.3),rgba(100,60,255,0.3))',
+      '--lio-slider-thumb':'linear-gradient(135deg,#ff60c0,#a060ff)',
+      '--lio-toggle-on':   'rgba(180,80,255,0.7)',
+      '--lio-val-color':   '#d090ff',
+      '--lio-viz-bg':      '#050508',
+      '--lio-mini-bg':     'rgba(10,10,22,0.97)',
+    },
     matrix: {
       name: 'Matrix',
-      bg: '#020204',
-      panelBg: 'rgba(2, 4, 2, 0.94)',
-      border: 'rgba(34, 180, 85, 0.3)',
-      text: '#c0e8c8',
-      dim: '#4a7a55',
-      accent: '#22b455',
-      accent2: '#80ce87',
-      vizHi: '#92e5a1',
-      vizLo: '#204829',
-      handleBg: 'linear-gradient(180deg, #0a1a0e, #050d07)',
-      font: '"Courier New", Courier, monospace',
+      '--lio-bg':          'rgba(0,8,0,0.97)',
+      '--lio-border':      'rgba(0,255,60,0.2)',
+      '--lio-accent1':     '#00ff41',
+      '--lio-accent2':     '#00cc33',
+      '--lio-accent3':     '#00ff80',
+      '--lio-handle-a':    '#003300',
+      '--lio-handle-b':    '#005500',
+      '--lio-handle-c':    '#00aa22',
+      '--lio-text':        '#a0ffb0',
+      '--lio-text-dim':    '#2a7a3a',
+      '--lio-tab-active-bg': 'rgba(0,255,60,0.12)',
+      '--lio-tab-active-border': 'rgba(0,255,60,0.5)',
+      '--lio-tab-active-color': '#00ff60',
+      '--lio-btn-play-bg': 'linear-gradient(135deg,rgba(0,180,40,0.3),rgba(0,80,20,0.4))',
+      '--lio-slider-thumb':'linear-gradient(135deg,#00ff41,#00aa22)',
+      '--lio-toggle-on':   'rgba(0,200,60,0.8)',
+      '--lio-val-color':   '#00ff80',
+      '--lio-viz-bg':      '#000800',
+      '--lio-mini-bg':     'rgba(0,6,0,0.98)',
     },
     oldschool: {
-      name: 'Old School',
-      bg: '#1a1410',
-      panelBg: 'rgba(26, 20, 16, 0.95)',
-      border: 'rgba(200, 160, 80, 0.3)',
-      text: '#e8d8b8',
-      dim: '#8a7a5a',
-      accent: '#d4a040',
-      accent2: '#e8c878',
-      vizHi: '#f0d890',
-      vizLo: '#8a6020',
-      handleBg: 'linear-gradient(180deg, #2a2018, #1a1410)',
-      font: '"VT323", "Courier New", monospace',
+      name: 'Oldschool',
+      '--lio-bg':          'rgba(12,8,0,0.97)',
+      '--lio-border':      'rgba(255,160,0,0.22)',
+      '--lio-accent1':     '#ffaa00',
+      '--lio-accent2':     '#ff8800',
+      '--lio-accent3':     '#ffcc44',
+      '--lio-handle-a':    '#3a2000',
+      '--lio-handle-b':    '#5a3000',
+      '--lio-handle-c':    '#aa6000',
+      '--lio-text':        '#ffe0a0',
+      '--lio-text-dim':    '#7a5020',
+      '--lio-tab-active-bg': 'rgba(255,160,0,0.15)',
+      '--lio-tab-active-border': 'rgba(255,160,0,0.5)',
+      '--lio-tab-active-color': '#ffcc44',
+      '--lio-btn-play-bg': 'linear-gradient(135deg,rgba(255,140,0,0.3),rgba(180,80,0,0.35))',
+      '--lio-slider-thumb':'linear-gradient(135deg,#ffaa00,#ff6600)',
+      '--lio-toggle-on':   'rgba(220,140,0,0.8)',
+      '--lio-val-color':   '#ffcc44',
+      '--lio-viz-bg':      '#0a0500',
+      '--lio-mini-bg':     'rgba(10,6,0,0.98)',
     },
     torn: {
-      name: 'Torn City',
-      bg: '#0a0a0e',
-      panelBg: 'rgba(10, 10, 16, 0.95)',
-      border: 'rgba(180, 60, 60, 0.3)',
-      text: '#e0d8d8',
-      dim: '#7a6a6a',
-      accent: '#cc3030',
-      accent2: '#ff6868',
-      vizHi: '#ff8080',
-      vizLo: '#602020',
-      handleBg: 'linear-gradient(180deg, #1a0a0a, #0e0505)',
-      font: '"Segoe UI", system-ui, sans-serif',
+      name: 'Torn',
+      '--lio-bg':          'rgba(14,4,4,0.97)',
+      '--lio-border':      'rgba(200,40,40,0.2)',
+      '--lio-accent1':     '#cc2222',
+      '--lio-accent2':     '#ee4444',
+      '--lio-accent3':     '#ff8888',
+      '--lio-handle-a':    '#3a0000',
+      '--lio-handle-b':    '#660000',
+      '--lio-handle-c':    '#990000',
+      '--lio-text':        '#f0d0d0',
+      '--lio-text-dim':    '#7a3030',
+      '--lio-tab-active-bg': 'rgba(200,40,40,0.18)',
+      '--lio-tab-active-border': 'rgba(200,40,40,0.55)',
+      '--lio-tab-active-color': '#ff8888',
+      '--lio-btn-play-bg': 'linear-gradient(135deg,rgba(200,30,30,0.35),rgba(120,10,10,0.4))',
+      '--lio-slider-thumb':'linear-gradient(135deg,#ee4444,#aa0000)',
+      '--lio-toggle-on':   'rgba(200,40,40,0.8)',
+      '--lio-val-color':   '#ff9090',
+      '--lio-viz-bg':      '#0a0000',
+      '--lio-mini-bg':     'rgba(12,2,2,0.98)',
     },
-    ocean: {
-      name: 'Deep Ocean',
-      bg: '#040810',
-      panelBg: 'rgba(4, 10, 20, 0.95)',
-      border: 'rgba(40, 140, 220, 0.3)',
-      text: '#b0d0e8',
-      dim: '#50708a',
-      accent: '#288cdc',
-      accent2: '#60b0e8',
-      vizHi: '#80d0f8',
-      vizLo: '#184868',
-      handleBg: 'linear-gradient(180deg, #081828, #040c18)',
-      font: '"Segoe UI", system-ui, sans-serif',
+    ice: {
+      name: 'Ice',
+      '--lio-bg':          'rgba(4,12,22,0.97)',
+      '--lio-border':      'rgba(80,200,255,0.2)',
+      '--lio-accent1':     '#40d0ff',
+      '--lio-accent2':     '#60a0ff',
+      '--lio-accent3':     '#a0f0ff',
+      '--lio-handle-a':    '#001830',
+      '--lio-handle-b':    '#003060',
+      '--lio-handle-c':    '#005090',
+      '--lio-text':        '#c0e8ff',
+      '--lio-text-dim':    '#306080',
+      '--lio-tab-active-bg': 'rgba(60,180,255,0.14)',
+      '--lio-tab-active-border': 'rgba(60,180,255,0.5)',
+      '--lio-tab-active-color': '#80d8ff',
+      '--lio-btn-play-bg': 'linear-gradient(135deg,rgba(40,160,255,0.3),rgba(20,80,200,0.35))',
+      '--lio-slider-thumb':'linear-gradient(135deg,#40d0ff,#2060cc)',
+      '--lio-toggle-on':   'rgba(40,160,255,0.8)',
+      '--lio-val-color':   '#80d8ff',
+      '--lio-viz-bg':      '#020810',
+      '--lio-mini-bg':     'rgba(2,8,18,0.98)',
     },
-    lava: {
-      name: 'Lava Lamp',
-      bg: '#140404',
-      panelBg: 'rgba(20, 6, 4, 0.95)',
-      border: 'rgba(255, 100, 20, 0.35)',
-      text: '#f0d0b0',
-      dim: '#8a5a3a',
-      accent: '#ff6820',
-      accent2: '#ffa040',
-      vizHi: '#ffc060',
-      vizLo: '#802010',
-      handleBg: 'linear-gradient(180deg, #280a04, #140402)',
-      font: '"Segoe UI", system-ui, sans-serif',
-    },
-    ghost: {
-      name: 'Ghost',
-      bg: '#08080c',
-      panelBg: 'rgba(12, 12, 18, 0.93)',
-      border: 'rgba(140, 140, 180, 0.25)',
-      text: '#c8c8d8',
-      dim: '#6a6a80',
-      accent: '#8080c0',
-      accent2: '#a0a0e0',
-      vizHi: '#c0c0f0',
-      vizLo: '#404060',
-      handleBg: 'linear-gradient(180deg, #14141e, #08080c)',
-      font: '"Segoe UI", system-ui, sans-serif',
-    },
+    custom: {
+      name: 'Custom',
+      // filled dynamically from state.customTheme
+    }
   };
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // BUILT-IN GENRES — 16 of them. each is a full sound profile.
-  // ═══════════════════════════════════════════════════════════════════════════
-  const builtinGenres = {
-    neonwar: {
-      name: 'Neon War Chain', genre: 'cyberpunk',
-      root: 45, scale: 'minor', wave: 'sawtooth', bassWave: 'square',
-      bpm: 124, swing: 0.04, chords: [0, 5, 3, 6],
-      reverbWet: 0.18, filterCutoff: 0.5, arpMode: false, chordMode: true,
-      drumPattern: 'standard', bassIntensity: 0.7, melodyDensity: 0.5,
-    },
-    island: {
-      name: 'Private Island Chill', genre: 'lofi',
-      root: 48, scale: 'major', wave: 'triangle', bassWave: 'sine',
-      bpm: 88, swing: 0.08, chords: [0, 4, 5, 3],
-      reverbWet: 0.3, filterCutoff: 0.65, arpMode: false, chordMode: false,
-      drumPattern: 'half', bassIntensity: 0.5, melodyDensity: 0.4,
-    },
-    bazaar: {
-      name: 'Bazaar Panic', genre: 'electronic',
-      root: 42, scale: 'dark', wave: 'square', bassWave: 'sawtooth',
-      bpm: 138, swing: 0.02, chords: [0, 2, 5, 1],
-      reverbWet: 0.1, filterCutoff: 0.55, arpMode: true, chordMode: false,
-      drumPattern: 'standard', bassIntensity: 0.8, melodyDensity: 0.6,
-    },
-    stealth: {
-      name: 'Stealth Hospital Run', genre: 'ambient',
-      root: 43, scale: 'dark', wave: 'sine', bassWave: 'triangle',
-      bpm: 104, swing: 0.12, chords: [0, 1, 3, 2],
-      reverbWet: 0.45, filterCutoff: 0.35, arpMode: false, chordMode: false,
-      drumPattern: 'sparse', bassIntensity: 0.4, melodyDensity: 0.25,
-    },
-    lofi_beats: {
-      name: 'Lo-Fi Study Hall', genre: 'lofi',
-      root: 50, scale: 'dorian', wave: 'triangle', bassWave: 'sine',
-      bpm: 75, swing: 0.14, chords: [0, 3, 4, 5],
-      reverbWet: 0.38, filterCutoff: 0.45, arpMode: false, chordMode: true,
-      drumPattern: 'lofi', bassIntensity: 0.45, melodyDensity: 0.3,
-    },
-    synthwave: {
-      name: 'Retrowave Highway', genre: 'synthwave',
-      root: 45, scale: 'minor', wave: 'sawtooth', bassWave: 'sawtooth',
-      bpm: 116, swing: 0.0, chords: [0, 5, 3, 7],
-      reverbWet: 0.25, filterCutoff: 0.7, arpMode: true, chordMode: true,
-      drumPattern: 'disco', bassIntensity: 0.75, melodyDensity: 0.55,
-    },
-    jazz_club: {
-      name: 'Back Alley Jazz', genre: 'jazz',
-      root: 53, scale: 'dorian', wave: 'sine', bassWave: 'triangle',
-      bpm: 95, swing: 0.2, chords: [0, 2, 4, 1],
-      reverbWet: 0.35, filterCutoff: 0.55, arpMode: false, chordMode: true,
-      drumPattern: 'jazz', bassIntensity: 0.55, melodyDensity: 0.65,
-    },
-    trap_drop: {
-      name: 'Faction Trap Drop', genre: 'trap',
-      root: 41, scale: 'minor', wave: 'sawtooth', bassWave: 'sine',
-      bpm: 140, swing: 0.0, chords: [0, 0, 5, 3],
-      reverbWet: 0.15, filterCutoff: 0.6, arpMode: false, chordMode: false,
-      drumPattern: 'trap', bassIntensity: 0.9, melodyDensity: 0.2,
-    },
-    offshore: {
-      name: 'Offshore Drone', genre: 'ambient',
-      root: 48, scale: 'lydian', wave: 'sine', bassWave: 'sine',
-      bpm: 60, swing: 0.0, chords: [0, 4, 2, 6],
-      reverbWet: 0.65, filterCutoff: 0.3, arpMode: false, chordMode: true,
-      drumPattern: 'none', bassIntensity: 0.25, melodyDensity: 0.2,
-    },
-    torn_blues: {
-      name: 'Torn Street Blues', genre: 'blues',
-      root: 45, scale: 'blues', wave: 'sawtooth', bassWave: 'square',
-      bpm: 100, swing: 0.1, chords: [0, 3, 0, 4],
-      reverbWet: 0.2, filterCutoff: 0.65, arpMode: false, chordMode: false,
-      drumPattern: 'rock', bassIntensity: 0.7, melodyDensity: 0.6,
-    },
-    city_pop: {
-      name: 'City Pop Nights', genre: 'citypop',
-      root: 52, scale: 'japanese', wave: 'triangle', bassWave: 'sine',
-      bpm: 102, swing: 0.06, chords: [0, 4, 2, 5],
-      reverbWet: 0.3, filterCutoff: 0.6, arpMode: true, chordMode: false,
-      drumPattern: 'standard', bassIntensity: 0.55, melodyDensity: 0.5,
-    },
-    dungeon: {
-      name: 'Dungeon Raid', genre: 'metal',
-      root: 40, scale: 'phrygian', wave: 'square', bassWave: 'sawtooth',
-      bpm: 150, swing: 0.0, chords: [0, 1, 3, 0],
-      reverbWet: 0.12, filterCutoff: 0.8, arpMode: true, chordMode: false,
-      drumPattern: 'metal', bassIntensity: 0.85, melodyDensity: 0.45,
-    },
-    flamenco_nights: {
-      name: 'Flamenco Nights', genre: 'world',
-      root: 45, scale: 'flamenco', wave: 'triangle', bassWave: 'sine',
-      bpm: 110, swing: 0.05, chords: [0, 3, 5, 3],
-      reverbWet: 0.28, filterCutoff: 0.55, arpMode: true, chordMode: false,
-      drumPattern: 'half', bassIntensity: 0.6, melodyDensity: 0.7,
-    },
-    arabic_souk: {
-      name: 'Arabic Souk', genre: 'world',
-      root: 43, scale: 'arabic', wave: 'triangle', bassWave: 'sine',
-      bpm: 92, swing: 0.08, chords: [0, 1, 4, 3],
-      reverbWet: 0.32, filterCutoff: 0.45, arpMode: true, chordMode: false,
-      drumPattern: 'sparse', bassIntensity: 0.5, melodyDensity: 0.65,
-    },
-    enigmatic_dream: {
-      name: 'Enigmatic Dream', genre: 'experimental',
-      root: 48, scale: 'enigmatic', wave: 'sine', bassWave: 'triangle',
-      bpm: 70, swing: 0.15, chords: [0, 4, 2, 6],
-      reverbWet: 0.5, filterCutoff: 0.4, arpMode: false, chordMode: true,
-      drumPattern: 'none', bassIntensity: 0.35, melodyDensity: 0.35,
-    },
-    reggaeton_heist: {
-      name: 'Reggaeton Heist', genre: 'latin',
-      root: 41, scale: 'minor', wave: 'sawtooth', bassWave: 'sine',
-      bpm: 96, swing: 0.03, chords: [0, 5, 3, 5],
-      reverbWet: 0.15, filterCutoff: 0.6, arpMode: false, chordMode: false,
-      drumPattern: 'reggaeton', bassIntensity: 0.8, melodyDensity: 0.35,
-    },
-  };
-
-  const genreIcons = {
-    cyberpunk: '🔮', lofi: '☕', electronic: '⚡', ambient: '🌊',
-    synthwave: '🌆', jazz: '🎷', trap: '🔊', blues: '🎸',
-    citypop: '🌸', metal: '💀', world: '🪕', experimental: '🔬',
-    latin: '🔥', custom: '🎨', default: '🎵',
-  };
-
-  function genreIcon(g) { return genreIcons[g] || genreIcons.default; }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // DEFAULT STATE
-  // ═══════════════════════════════════════════════════════════════════════════
-  const defaultState = {
-    collapsed: false, miniplayer: false, x: null, y: null,
-    preset: 'neonwar', bpm: 124, energy: 0.62, volume: 0.34,
-    seed: 'torn-war-777',
-    drums: true, bass: true, melody: true, fx: true,
-    reverb: true, reverbWet: 0.18,
-    visualizer: true, vizMode: 'bars',
-    arpMode: false, arpRate: 2,
-    chordMode: true, chordVoicing: 'triad',
-    filterCutoff: 0.5,
-    eqBass: 0.5, eqLow: 0.5, eqMid: 0.5, eqHigh: 0.5, eqAir: 0.5,
-    drumPattern: 'standard',
-    bassIntensity: 0.7, melodyDensity: 0.5,
-    activeTab: 'play',
-    customGenres: {},
-    // v3 additions
-    theme: 'matrix',
-    customColor: '#22b455',
-    songMode: false, songModeSpeed: 0.5,
-    sleepTimer: 0, // minutes, 0 = off
-    swing: 0.04,
-    // v4 additions — torn api integration
-    tornMode: false,
-    tornApiKey: '',
-    tornPollInterval: 60, // seconds between polls
-    tornMapEnergy: true,
-    tornMapNerve: true,
-    tornMapHappy: true,
-    tornMapLife: true,
-    tornMapCooldowns: true,
-    tornMapStatus: true,
-    tornMapTravel: true,
-    tornMapMoney: true,
-    tornMapIntensity: 0.7, // how strongly torn state affects params
+  // ── DEFAULT STATE ────────────────────────────────────────────────────────────
+  const DEF = {
+    collapsed:false, x:null, y:null,
+    preset:'neonwar', bpm:124, energy:0.62, volume:0.34, seed:'torn-war-777',
+    drums:true, bass:true, melody:true, fx:true, reverb:true,
+    reverbWet:0.18, visualizer:true,
+    arpMode:false, arpRate:2, chordMode:true, chordVoicing:'triad',
+    filterCutoff:0.5,
+    eqBass:0.5, eqLow:0.5, eqMid:0.5, eqHigh:0.5, eqAir:0.5,
+    drumPattern:'standard', bassIntensity:0.7, melodyDensity:0.5,
+    activeTab:'play',
+    customGenres:{},
+    theme:'default',
+    customThemeAccent:'#9060ff',
+    customThemeBg:'rgba(8,8,16,0.97)',
+    // Song Mode
+    songMode:false,
+    songSpeed:30,      // seconds for a full LFO cycle
+    songDepth:0.35,    // 0..1 how wide the modulation swings
+    songTurbulence:0.2,// 0..1 amount of random jitter on top
   };
 
   function loadState() {
-    try {
-      const stored = JSON.parse(localStorage.getItem(STORE_KEY) || '{}');
-      return Object.assign({}, defaultState, stored);
-    } catch { return Object.assign({}, defaultState); }
+    try { return Object.assign({}, DEF, JSON.parse(localStorage.getItem(STORE_KEY) || '{}')); }
+    catch { return Object.assign({}, DEF); }
   }
-
   const state = loadState();
+  function saveState() { try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch {} }
 
-  function getAllGenres() {
-    const customs = {};
-    Object.entries(state.customGenres || {}).forEach(([k, v]) => {
-      customs['custom_' + k] = v;
-    });
-    return Object.assign({}, builtinGenres, customs);
+  function allPresets() {
+    const c = {};
+    Object.entries(state.customGenres||{}).forEach(([k,v]) => { c['custom_'+k] = v; });
+    return Object.assign({}, PRESETS, c);
   }
 
-  function saveState() {
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch {}
+  function clamp(v,lo,hi) { return Math.max(lo,Math.min(hi,v)); }
+  function lerp(a,b,t) { return a + (b-a)*t; }
+  function hashStr(s) {
+    let h=2166136261;
+    for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}
+    return h>>>0;
   }
-
-  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // SEEDED RNG — mulberry32. deterministic from a string seed.
-  // ═══════════════════════════════════════════════════════════════════════════
-  function hashString(str) {
-    let h = 2166136261;
-    for (let i = 0; i < str.length; i++) {
-      h ^= str.charCodeAt(i);
-      h = Math.imul(h, 16777619);
-    }
-    return h >>> 0;
-  }
-
   function mulberry32(seed) {
-    return function () {
-      let t = seed += 0x6D2B79F5;
-      t = Math.imul(t ^ (t >>> 15), t | 1);
-      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
+    return ()=>{let t=seed+=0x6D2B79F5;t=Math.imul(t^(t>>>15),t|1);t^=t+Math.imul(t^(t>>>7),t|61);return((t^(t>>>14))>>>0)/4294967296;};
+  }
+  function midiToFreq(m) { return 440*Math.pow(2,(m-69)/12); }
+  function iconForGenre(g) { return GENRE_ICONS[g]||GENRE_ICONS.default; }
+
+  // ── CSS ─────────────────────────────────────────────────────────────────────
+  function buildThemeVars(themeKey) {
+    const t = THEMES[themeKey] || THEMES.default;
+    if (themeKey === 'custom') {
+      const a = state.customThemeAccent || '#9060ff';
+      // derive variants from accent hex
+      const bg = state.customThemeBg || 'rgba(8,8,16,0.97)';
+      return {
+        '--lio-bg': bg,
+        '--lio-border': a+'33',
+        '--lio-accent1': a,
+        '--lio-accent2': a,
+        '--lio-accent3': a+'cc',
+        '--lio-handle-a': '#111',
+        '--lio-handle-b': '#1a1a1a',
+        '--lio-handle-c': a+'88',
+        '--lio-text': '#e8e8f0',
+        '--lio-text-dim': '#606080',
+        '--lio-tab-active-bg': a+'22',
+        '--lio-tab-active-border': a+'88',
+        '--lio-tab-active-color': a,
+        '--lio-btn-play-bg': `linear-gradient(135deg,${a}44,${a}22)`,
+        '--lio-slider-thumb': `linear-gradient(135deg,${a},${a}88)`,
+        '--lio-toggle-on': a+'cc',
+        '--lio-val-color': a,
+        '--lio-viz-bg': '#030305',
+        '--lio-mini-bg': 'rgba(6,6,14,0.98)',
+      };
+    }
+    return t;
   }
 
-  function midiToFreq(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+  function applyTheme(themeKey) {
+    const vars = buildThemeVars(themeKey);
+    const panel = document.getElementById(PANEL_ID);
+    const mini  = document.getElementById(MINI_ID);
+    [panel, mini].forEach(el => {
+      if (!el) return;
+      Object.entries(vars).forEach(([k,v]) => el.style.setProperty(k, v));
+    });
+  }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // CSS INJECTION — themed via CSS custom properties.
-  // the theme object gets flattened into --vars at runtime.
-  // ═══════════════════════════════════════════════════════════════════════════
   function injectCss() {
     if (document.getElementById(STYLE_ID)) return;
-    const style = document.createElement('style');
-    style.id = STYLE_ID;
-    style.textContent = `
-      /* ── base panel ── */
+    const s = document.createElement('style');
+    s.id = STYLE_ID;
+    s.textContent = `
       #${PANEL_ID} {
-        position: fixed;
-        width: 350px;
-        max-width: calc(100vw - 12px);
-        z-index: 999999;
-        color: var(--lio-text);
-        background: var(--lio-panelBg);
-        border: 1px solid var(--lio-border);
-        border-radius: 14px;
-        overflow: hidden;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-        font-family: var(--lio-font);
-        transition: transform 0.2s ease, width 0.2s ease;
+        position:fixed; width:358px; max-width:calc(100vw - 12px);
+        z-index:999998; border-radius:18px; overflow:hidden;
+        background:var(--lio-bg,rgba(10,10,18,0.96));
+        border:1px solid var(--lio-border,rgba(200,160,255,0.18));
+        box-shadow:0 0 0 1px rgba(0,0,0,0.3), 0 20px 55px rgba(0,0,0,0.6);
+        font-family:ui-monospace,'Cascadia Code','SF Mono',monospace;
+        backdrop-filter:blur(16px); color:var(--lio-text,#e0e0f0);
+        transition:transform 0.22s cubic-bezier(.4,0,.2,1);
       }
-      #${PANEL_ID}.lio-collapsed { transform: translateX(calc(100% - 42px)); }
-      #${PANEL_ID}.lio-mini { width: 240px; }
-      #${PANEL_ID} * { box-sizing: border-box; }
+      #${PANEL_ID}.collapsed { transform:translateX(calc(100% - 46px)); }
+      #${PANEL_ID} * { box-sizing:border-box; }
 
-      /* ── handle (the grab strip on the left) ── */
-      #${PANEL_ID} .lio-handle {
-        position: absolute; left: 0; top: 0;
-        width: 42px; height: 100%;
-        display: grid; place-items: center;
-        background: var(--lio-handleBg);
-        cursor: pointer; user-select: none;
-        border-right: 1px solid var(--lio-border);
+      #${PANEL_ID} .handle {
+        position:absolute; left:0; top:0; width:46px; height:100%;
+        display:grid; place-items:center; cursor:pointer; user-select:none;
+        background:linear-gradient(180deg,
+          var(--lio-handle-a,#330033) 0%,
+          var(--lio-handle-b,#220055) 50%,
+          var(--lio-handle-c,#003388) 100%);
+        writing-mode:vertical-rl;
       }
-      #${PANEL_ID} .lio-handle-label {
-        writing-mode: vertical-rl; transform: rotate(180deg);
-        font-size: 11px; font-weight: 700; letter-spacing: 2px;
-        color: var(--lio-accent); opacity: 0.7;
+      #${PANEL_ID} .handle-label {
+        transform:rotate(180deg); font-size:9px; font-weight:700;
+        letter-spacing:3px; color:rgba(255,255,255,0.8);
+        text-shadow:0 0 10px rgba(255,255,255,0.4);
       }
 
-      /* ── inner content ── */
-      #${PANEL_ID} .lio-inner { padding: 8px 8px 8px 50px; }
+      #${PANEL_ID} .inner { padding:10px 10px 10px 56px; }
 
-      /* ── top bar ── */
-      #${PANEL_ID} .lio-topbar {
-        display: flex; align-items: center; gap: 6px;
-        margin-bottom: 6px; cursor: grab; user-select: none;
+      #${PANEL_ID} .topbar {
+        display:flex; align-items:center; gap:6px; margin-bottom:7px;
+        cursor:grab; user-select:none;
       }
-      #${PANEL_ID} .lio-topbar-title {
-        flex: 1; font-size: 14px; font-weight: 700;
-        color: var(--lio-accent);
+      #${PANEL_ID} .topbar-title {
+        flex:1; font-size:11px; font-weight:700;
+        background:linear-gradient(90deg,var(--lio-accent1),var(--lio-accent2),var(--lio-accent3));
+        -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+        letter-spacing:1px;
       }
-      #${PANEL_ID} .lio-topbar-status {
-        font-size: 10px; color: var(--lio-dim); max-width: 90px;
-        text-overflow: ellipsis; overflow: hidden; white-space: nowrap;
-        text-align: right;
+      #${PANEL_ID} .topbar-status {
+        font-size:8px; color:var(--lio-text-dim); max-width:90px;
+        overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right;
       }
+      #${PANEL_ID} .topbar-btn {
+        padding:3px 7px; font-size:9px; border-radius:6px; cursor:pointer;
+        border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.06);
+        color:var(--lio-text-dim); transition:background 0.15s;
+      }
+      #${PANEL_ID} .topbar-btn:hover { background:rgba(255,255,255,0.12); }
 
-      /* ── tabs ── */
-      #${PANEL_ID} .lio-tabs { display: flex; gap: 2px; margin-bottom: 6px; }
-      #${PANEL_ID} .lio-tab {
-        flex: 1; padding: 5px 3px; font-size: 10px; font-weight: 700;
-        background: rgba(128,128,128,0.08); border: 1px solid rgba(128,128,128,0.1);
-        border-radius: 6px; color: var(--lio-dim); cursor: pointer;
-        text-align: center; transition: all 0.12s;
-        text-transform: uppercase; letter-spacing: 0.3px;
+      /* TABS */
+      #${PANEL_ID} .tabs { display:flex; gap:2px; margin-bottom:8px; }
+      #${PANEL_ID} .tab {
+        flex:1; padding:5px 2px; font-size:8px; font-weight:700; text-align:center;
+        border:1px solid rgba(255,255,255,0.07); border-radius:7px; cursor:pointer;
+        color:var(--lio-text-dim); background:rgba(255,255,255,0.04);
+        transition:all 0.14s; letter-spacing:0.3px; text-transform:uppercase;
+        user-select:none;
       }
-      #${PANEL_ID} .lio-tab.active { background: var(--lio-accent); color: var(--lio-bg); border-color: var(--lio-accent); }
-      #${PANEL_ID} .lio-tab:hover:not(.active) { color: var(--lio-text); background: rgba(128,128,128,0.15); }
-
-      #${PANEL_ID} .lio-pane { display: none; }
-      #${PANEL_ID} .lio-pane.active { display: block; }
-
-      /* ── visualizer canvas ── */
-      #${PANEL_ID} .lio-viz-wrap {
-        border-radius: 8px; overflow: hidden;
-        background: var(--lio-bg); margin-bottom: 6px;
-        border: 1px solid var(--lio-border);
+      #${PANEL_ID} .tab.on {
+        background:var(--lio-tab-active-bg); border-color:var(--lio-tab-active-border);
+        color:var(--lio-tab-active-color);
       }
-      #${PANEL_ID} canvas { display: block; width: 100%; height: 56px; }
+      #${PANEL_ID} .tab:hover:not(.on) { background:rgba(255,255,255,0.08); color:var(--lio-text); }
 
-      /* ── buttons ── */
+      #${PANEL_ID} .pane { display:none; }
+      #${PANEL_ID} .pane.on { display:block; }
+
+      /* SCROLL */
+      #${PANEL_ID} .scroll { max-height:310px; overflow-y:auto; padding-right:2px; }
+      #${PANEL_ID} .scroll::-webkit-scrollbar { width:2px; }
+      #${PANEL_ID} .scroll::-webkit-scrollbar-thumb { background:var(--lio-accent2); border-radius:2px; opacity:0.4; }
+
+      /* VIZ */
+      #${PANEL_ID} .viz-wrap {
+        border-radius:9px; overflow:hidden; margin-bottom:7px;
+        background:var(--lio-viz-bg,#050508);
+        border:1px solid rgba(255,255,255,0.05);
+      }
+      #${PANEL_ID} canvas { display:block; width:100%; height:60px; }
+
+      /* BUTTONS */
       #${PANEL_ID} button {
-        padding: 6px 7px; font-size: 11px; font-weight: 700;
-        border: 1px solid rgba(128,128,128,0.15); border-radius: 7px;
-        background: rgba(128,128,128,0.08); color: var(--lio-text);
-        cursor: pointer; transition: all 0.12s; outline: none;
+        padding:6px 8px; font-size:9px; font-weight:700; letter-spacing:0.4px;
+        border:1px solid rgba(255,255,255,0.1); border-radius:8px;
+        background:rgba(255,255,255,0.06); color:var(--lio-text);
+        cursor:pointer; transition:all 0.14s; outline:none; font-family:inherit;
       }
-      #${PANEL_ID} button:hover { background: rgba(128,128,128,0.18); }
-      #${PANEL_ID} button.lio-play-btn {
-        background: var(--lio-accent); color: var(--lio-bg);
-        border-color: var(--lio-accent); font-size: 12px;
+      #${PANEL_ID} button:hover { background:rgba(255,255,255,0.12); border-color:rgba(255,255,255,0.2); }
+      #${PANEL_ID} .btn-play {
+        background:var(--lio-btn-play-bg); border-color:var(--lio-accent2);
+        color:#fff; font-size:10px; text-align:center;
       }
-      #${PANEL_ID} button.lio-play-btn.playing {
-        background: var(--lio-accent2); animation: lio-pulse 1.5s ease-in-out infinite;
+      #${PANEL_ID} .btn-play.playing {
+        background:linear-gradient(135deg,rgba(255,50,50,0.3),rgba(180,20,80,0.3));
+        border-color:rgba(255,80,80,0.55);
+        box-shadow:0 0 10px rgba(255,60,60,0.2);
       }
-      @keyframes lio-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.75; } }
-      #${PANEL_ID} button.lio-danger { color: #ff6060; border-color: rgba(255,80,80,0.3); }
-      #${PANEL_ID} button.lio-accent { color: var(--lio-accent); border-color: var(--lio-accent); }
-      #${PANEL_ID} button.active { background: var(--lio-accent); color: var(--lio-bg); }
+      #${PANEL_ID} .btn-danger { background:rgba(255,50,50,0.1); border-color:rgba(255,80,80,0.28); color:#ff9090; }
+      #${PANEL_ID} .btn-accent { background:rgba(60,160,255,0.1); border-color:rgba(60,160,255,0.28); color:#70b8ff; }
+      #${PANEL_ID} .btn-song {
+        background:rgba(255,200,40,0.1); border-color:rgba(255,200,40,0.3); color:#ffe060;
+      }
+      #${PANEL_ID} .btn-song.on {
+        background:rgba(255,200,40,0.22); border-color:rgba(255,200,40,0.65);
+        color:#ffe060; box-shadow:0 0 10px rgba(255,200,40,0.2);
+        animation:lio-song-glow 2s ease-in-out infinite;
+      }
+      @keyframes lio-song-glow { 0%,100%{box-shadow:0 0 6px rgba(255,200,40,0.2)} 50%{box-shadow:0 0 14px rgba(255,200,40,0.45)} }
 
-      /* ── selects & inputs ── */
-      #${PANEL_ID} select, #${PANEL_ID} input[type="text"], #${PANEL_ID} input[type="number"] {
-        width: 100%; padding: 5px 7px; font-size: 11px;
-        border: 1px solid rgba(128,128,128,0.15); border-radius: 7px;
-        background: rgba(128,128,128,0.06); color: var(--lio-text); outline: none;
-        font-family: var(--lio-font);
+      /* SELECTS / TEXT INPUTS */
+      #${PANEL_ID} select, #${PANEL_ID} input[type=text] {
+        width:100%; padding:5px 7px; font-size:9px; font-family:inherit;
+        border:1px solid rgba(255,255,255,0.09); border-radius:8px;
+        background:rgba(255,255,255,0.05); color:var(--lio-text); outline:none;
       }
-      #${PANEL_ID} select option { color: #111; }
-
-      /* ── labels ── */
-      #${PANEL_ID} .lio-label {
-        font-size: 10px; color: var(--lio-dim); margin-bottom: 2px;
-        font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
-      }
-      #${PANEL_ID} .lio-labeled { display: grid; gap: 2px; }
-
-      /* ── sliders ── */
-      #${PANEL_ID} .lio-slider-row { display: grid; gap: 1px; margin-bottom: 4px; }
-      #${PANEL_ID} .lio-slider-header { display: flex; justify-content: space-between; align-items: center; }
-      #${PANEL_ID} .lio-slider-name { font-size: 10px; color: var(--lio-dim); font-weight: 600; text-transform: uppercase; }
-      #${PANEL_ID} .lio-slider-val { font-size: 10px; color: var(--lio-accent); font-weight: 700; min-width: 28px; text-align: right; }
-      #${PANEL_ID} input[type="range"] {
-        width: 100%; height: 3px; margin: 0;
-        -webkit-appearance: none; appearance: none;
-        background: rgba(128,128,128,0.2); border-radius: 2px; outline: none;
-        border: none; padding: 0; cursor: pointer;
-      }
-      #${PANEL_ID} input[type="range"]::-webkit-slider-thumb {
-        -webkit-appearance: none; width: 10px; height: 10px; border-radius: 50%;
-        background: var(--lio-accent); cursor: pointer;
+      #${PANEL_ID} select option { color:#111; background:#222; }
+      #${PANEL_ID} input[type=text]::placeholder { color:var(--lio-text-dim); }
+      #${PANEL_ID} input[type=color] {
+        width:28px; height:22px; border-radius:5px; border:1px solid rgba(255,255,255,0.12);
+        background:transparent; padding:1px; cursor:pointer;
       }
 
-      /* ── toggle switches ── */
-      #${PANEL_ID} .lio-toggle-group { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; margin-bottom: 4px; }
-      #${PANEL_ID} .lio-toggle-group.three { grid-template-columns: 1fr 1fr 1fr; }
-      #${PANEL_ID} .lio-toggle-group.four { grid-template-columns: 1fr 1fr 1fr 1fr; }
-      #${PANEL_ID} .lio-toggle {
-        display: flex; align-items: center; gap: 4px;
-        padding: 3px 5px; border-radius: 6px;
-        border: 1px solid rgba(128,128,128,0.1);
-        background: rgba(128,128,128,0.05); cursor: pointer;
+      /* LABELS */
+      #${PANEL_ID} .lbl {
+        font-size:8px; font-weight:700; letter-spacing:0.8px; text-transform:uppercase;
+        color:var(--lio-text-dim); margin-bottom:3px;
       }
-      #${PANEL_ID} .lio-toggle input { display: none; }
-      #${PANEL_ID} .lio-toggle-dot {
-        width: 18px; height: 10px; border-radius: 5px;
-        background: rgba(128,128,128,0.2); position: relative;
-        transition: background 0.15s; flex-shrink: 0;
-      }
-      #${PANEL_ID} .lio-toggle-dot::after {
-        content: ''; position: absolute; width: 7px; height: 7px;
-        border-radius: 50%; background: #fff;
-        top: 1.5px; left: 1.5px; transition: transform 0.15s;
-      }
-      #${PANEL_ID} .lio-toggle.on .lio-toggle-dot { background: var(--lio-accent); }
-      #${PANEL_ID} .lio-toggle.on .lio-toggle-dot::after { transform: translateX(8px); }
-      #${PANEL_ID} .lio-toggle-label { font-size: 10px; font-weight: 700; color: var(--lio-dim); }
-      #${PANEL_ID} .lio-toggle.on .lio-toggle-label { color: var(--lio-accent); }
+      #${PANEL_ID} .field { display:grid; gap:2px; margin-bottom:4px; }
 
-      /* ── sequencer ── */
-      #${PANEL_ID} .lio-seq { margin-bottom: 4px; }
-      #${PANEL_ID} .lio-seq-row { display: flex; gap: 2px; margin-bottom: 2px; align-items: center; }
-      #${PANEL_ID} .lio-seq-name { font-size: 9px; color: var(--lio-dim); font-weight: 700; width: 26px; flex-shrink: 0; }
-      #${PANEL_ID} .lio-seq-cell {
-        flex: 1; height: 12px; border-radius: 2px;
-        background: rgba(128,128,128,0.1); cursor: pointer;
-        border: 1px solid rgba(128,128,128,0.06); transition: background 0.08s;
-      }
-      #${PANEL_ID} .lio-seq-cell.on { background: var(--lio-accent); }
-      #${PANEL_ID} .lio-seq-cell.active-step { box-shadow: 0 0 0 1px var(--lio-text); }
+      /* GRIDS */
+      #${PANEL_ID} .g2 { display:grid; grid-template-columns:1fr 1fr; gap:4px; margin-bottom:4px; }
+      #${PANEL_ID} .g3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:4px; margin-bottom:4px; }
+      #${PANEL_ID} .sep { height:1px; background:rgba(255,255,255,0.07); margin:7px 0; }
 
-      /* ── status bar ── */
-      #${PANEL_ID} .lio-status-bar {
-        margin-top: 5px; padding: 3px 6px;
-        background: rgba(128,128,128,0.05); border-radius: 5px;
-        font-size: 10px; color: var(--lio-dim); min-height: 20px;
-        border: 1px solid rgba(128,128,128,0.08);
-        display: flex; align-items: center; gap: 4px;
+      /* SLIDERS */
+      #${PANEL_ID} .sr { margin-bottom:5px; }
+      #${PANEL_ID} .sr-head { display:flex; justify-content:space-between; margin-bottom:2px; }
+      #${PANEL_ID} .sr-name { font-size:8px; font-weight:700; color:var(--lio-text-dim); text-transform:uppercase; letter-spacing:0.5px; }
+      #${PANEL_ID} .sr-val  { font-size:8px; font-weight:700; color:var(--lio-val-color,#d090ff); min-width:28px; text-align:right; }
+      #${PANEL_ID} .sr-val.modulated { color:var(--lio-accent3) !important; }
+      #${PANEL_ID} input[type=range] {
+        width:100%; height:3px; -webkit-appearance:none; appearance:none;
+        background:rgba(255,255,255,0.1); border-radius:2px;
+        border:none; padding:0; cursor:pointer; outline:none; margin:0;
       }
-      #${PANEL_ID} .lio-status-dot {
-        width: 5px; height: 5px; border-radius: 50%;
-        background: var(--lio-dim); flex-shrink: 0; transition: background 0.3s;
+      #${PANEL_ID} input[type=range]::-webkit-slider-thumb {
+        -webkit-appearance:none; width:11px; height:11px; border-radius:50%;
+        background:var(--lio-slider-thumb); cursor:pointer;
+        box-shadow:0 0 5px rgba(0,0,0,0.5);
+        transition:transform 0.1s;
       }
-      #${PANEL_ID} .lio-status-dot.playing { background: var(--lio-accent); box-shadow: 0 0 4px var(--lio-accent); }
+      #${PANEL_ID} input[type=range]::-webkit-slider-thumb:hover { transform:scale(1.2); }
+      #${PANEL_ID} input[type=range].modulated { background:rgba(255,200,40,0.25); }
 
-      /* ── scrollable panes ── */
-      #${PANEL_ID} .lio-scroll { max-height: 280px; overflow-y: auto; padding-right: 2px; }
-      #${PANEL_ID} .lio-scroll::-webkit-scrollbar { width: 3px; }
-      #${PANEL_ID} .lio-scroll::-webkit-scrollbar-thumb { background: var(--lio-accent); border-radius: 2px; opacity: 0.4; }
-
-      /* ── preset cards ── */
-      #${PANEL_ID} .lio-preset-card {
-        display: flex; align-items: center; gap: 5px;
-        padding: 5px 7px; border-radius: 7px; margin-bottom: 3px;
-        background: rgba(128,128,128,0.05); border: 1px solid rgba(128,128,128,0.1);
-        cursor: pointer; transition: all 0.12s;
+      /* TOGGLES */
+      #${PANEL_ID} .tg-group { display:grid; grid-template-columns:1fr 1fr; gap:3px; margin-bottom:4px; }
+      #${PANEL_ID} .tg-group.four { grid-template-columns:1fr 1fr 1fr 1fr; }
+      #${PANEL_ID} .tg {
+        display:flex; align-items:center; gap:4px; padding:5px 6px;
+        border-radius:7px; border:1px solid rgba(255,255,255,0.07);
+        background:rgba(255,255,255,0.03); cursor:pointer; user-select:none;
       }
-      #${PANEL_ID} .lio-preset-card:hover { background: rgba(128,128,128,0.12); }
-      #${PANEL_ID} .lio-preset-card.active { border-color: var(--lio-accent); background: rgba(128,128,128,0.1); }
-      #${PANEL_ID} .lio-preset-card-icon { font-size: 14px; flex-shrink: 0; }
-      #${PANEL_ID} .lio-preset-card-info { flex: 1; min-width: 0; }
-      #${PANEL_ID} .lio-preset-card-name { font-size: 11px; font-weight: 700; color: var(--lio-text); }
-      #${PANEL_ID} .lio-preset-card-meta { font-size: 9px; color: var(--lio-dim); }
-      #${PANEL_ID} .lio-preset-card-bpm { font-size: 10px; color: var(--lio-accent); font-weight: 700; }
-      #${PANEL_ID} .lio-preset-badge {
-        font-size: 9px; padding: 2px 5px; border-radius: 3px;
-        background: rgba(128,128,128,0.1); color: var(--lio-dim);
-        text-transform: uppercase; font-weight: 700; letter-spacing: 0.3px;
+      #${PANEL_ID} .tg input { display:none; }
+      #${PANEL_ID} .tg-dot {
+        width:20px; height:11px; border-radius:6px;
+        background:rgba(255,255,255,0.1); position:relative;
+        transition:background 0.18s; flex-shrink:0;
+      }
+      #${PANEL_ID} .tg-dot::after {
+        content:''; position:absolute; width:7px; height:7px; border-radius:50%;
+        background:#fff; top:2px; left:2px; transition:transform 0.18s;
+      }
+      #${PANEL_ID} .tg.on .tg-dot { background:var(--lio-toggle-on,rgba(180,80,255,0.7)); }
+      #${PANEL_ID} .tg.on .tg-dot::after { transform:translateX(9px); }
+      #${PANEL_ID} .tg-lbl { font-size:8px; font-weight:700; color:var(--lio-text-dim); }
+      #${PANEL_ID} .tg.on .tg-lbl { color:var(--lio-val-color); }
+
+      /* STATUS BAR */
+      #${PANEL_ID} .status-bar {
+        margin-top:5px; padding:4px 7px; background:rgba(255,255,255,0.03);
+        border-radius:6px; font-size:8px; color:var(--lio-text-dim); min-height:22px;
+        border:1px solid rgba(255,255,255,0.05); display:flex; align-items:center; gap:5px;
+      }
+      #${PANEL_ID} .status-dot {
+        width:5px; height:5px; border-radius:50%; background:#303050; flex-shrink:0; transition:background 0.3s;
+      }
+      #${PANEL_ID} .status-dot.on {
+        background:#40ff80; box-shadow:0 0 5px rgba(64,255,128,0.5);
+        animation:lio-pulse 1.1s ease-in-out infinite;
+      }
+      @keyframes lio-pulse { 0%,100%{opacity:1} 50%{opacity:0.35} }
+
+      /* STEP SEQ */
+      #${PANEL_ID} .seq-row { display:flex; gap:2px; margin-bottom:2px; align-items:center; }
+      #${PANEL_ID} .seq-name { font-size:7px; color:var(--lio-text-dim); font-weight:700; width:28px; flex-shrink:0; }
+      #${PANEL_ID} .seq-cell {
+        flex:1; height:13px; border-radius:3px;
+        background:rgba(255,255,255,0.05); cursor:pointer;
+        border:1px solid rgba(255,255,255,0.03); transition:background 0.08s;
+      }
+      #${PANEL_ID} .seq-cell.on.kick  { background:rgba(255,80,80,0.7); border-color:rgba(255,80,80,0.4); }
+      #${PANEL_ID} .seq-cell.on.snare { background:rgba(255,180,40,0.7); border-color:rgba(255,180,40,0.4); }
+      #${PANEL_ID} .seq-cell.on.hat   { background:rgba(40,200,255,0.7); border-color:rgba(40,200,255,0.4); }
+      #${PANEL_ID} .seq-cell.on.ohat  { background:rgba(100,255,180,0.7); border-color:rgba(100,255,180,0.4); }
+      #${PANEL_ID} .seq-cell.cur { box-shadow:0 0 0 1px rgba(255,255,255,0.45); }
+
+      /* EQ */
+      #${PANEL_ID} .eq { display:flex; gap:4px; align-items:flex-end; height:44px; margin-bottom:4px; }
+      #${PANEL_ID} .eq-band { flex:1; display:flex; flex-direction:column; align-items:center; gap:2px; height:100%; }
+      #${PANEL_ID} .eq-band input[type=range] { writing-mode:vertical-lr; direction:rtl; width:3px; flex:1; }
+      #${PANEL_ID} .eq-band span { font-size:7px; color:var(--lio-text-dim); }
+
+      /* PRESET CARDS */
+      #${PANEL_ID} .pcard {
+        display:flex; align-items:center; gap:6px; padding:5px 7px;
+        border-radius:8px; margin-bottom:3px;
+        background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06);
+        cursor:pointer; transition:all 0.13s;
+      }
+      #${PANEL_ID} .pcard:hover { background:rgba(255,255,255,0.07); border-color:rgba(255,255,255,0.13); }
+      #${PANEL_ID} .pcard.on { background:var(--lio-tab-active-bg); border-color:var(--lio-tab-active-border); }
+      #${PANEL_ID} .pcard-icon { font-size:16px; flex-shrink:0; }
+      #${PANEL_ID} .pcard-info { flex:1; min-width:0; }
+      #${PANEL_ID} .pcard-name { font-size:9px; font-weight:700; color:var(--lio-text); }
+      #${PANEL_ID} .pcard-meta { font-size:7px; color:var(--lio-text-dim); }
+      #${PANEL_ID} .pcard-bpm  { font-size:8px; font-weight:700; color:var(--lio-val-color); }
+      #${PANEL_ID} .pcard-tag  {
+        font-size:6px; padding:2px 4px; border-radius:3px;
+        background:rgba(255,255,255,0.07); color:var(--lio-text-dim);
+        text-transform:uppercase; font-weight:700;
       }
 
-      /* ── miniplayer ── */
-      #${PANEL_ID} .lio-mini-content { display: none; }
-      #${PANEL_ID}.lio-mini .lio-mini-content { display: block; }
-      #${PANEL_ID}.lio-mini .lio-full-content { display: none; }
-      #${PANEL_ID} .lio-mini-viz { border-radius: 6px; overflow: hidden; background: var(--lio-bg); margin-bottom: 4px; border: 1px solid var(--lio-border); }
-      #${PANEL_ID} .lio-mini-viz canvas { display: block; width: 100%; height: 32px; }
-
-      /* ── color picker row ── */
-      #${PANEL_ID} .lio-color-row { display: flex; gap: 3px; align-items: center; margin-bottom: 4px; }
-      #${PANEL_ID} .lio-color-swatch {
-        width: 16px; height: 16px; border-radius: 4px; cursor: pointer;
-        border: 2px solid rgba(128,128,128,0.2); transition: border-color 0.12s;
+      /* SONG MODE PANEL */
+      #${PANEL_ID} .song-panel {
+        padding:8px; border-radius:9px; margin-bottom:5px;
+        background:rgba(255,200,40,0.06); border:1px solid rgba(255,200,40,0.18);
       }
-      #${PANEL_ID} .lio-color-swatch:hover { border-color: var(--lio-text); }
-      #${PANEL_ID} .lio-color-swatch.active { border-color: var(--lio-accent); }
-      #${PANEL_ID} input[type="color"] { width: 24px; height: 18px; border: none; background: none; cursor: pointer; padding: 0; }
+      #${PANEL_ID} .song-panel .lbl { color:#aa9020; }
+      #${PANEL_ID} .song-panel .sr-name { color:#aa9020; }
+      #${PANEL_ID} .song-vis {
+        height:18px; border-radius:4px; overflow:hidden; margin-bottom:6px;
+        background:rgba(0,0,0,0.3); position:relative;
+      }
+      #${PANEL_ID} .song-vis canvas { width:100% !important; height:18px !important; }
 
-      /* ── grid helpers ── */
-      #${PANEL_ID} .lio-row { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 4px; }
-      #${PANEL_ID} .lio-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; margin-bottom: 4px; }
-      #${PANEL_ID} .lio-sep { height: 1px; background: rgba(128,128,128,0.1); margin: 5px 0; }
+      /* THEME SWATCHES */
+      #${PANEL_ID} .swatches { display:flex; gap:4px; flex-wrap:wrap; margin-bottom:6px; }
+      #${PANEL_ID} .swatch {
+        width:28px; height:20px; border-radius:5px; cursor:pointer;
+        border:2px solid transparent; transition:border-color 0.14s;
+        font-size:9px; display:grid; place-items:center; font-weight:700;
+      }
+      #${PANEL_ID} .swatch.on { border-color:rgba(255,255,255,0.7); }
+
+      /* ─── MINIPLAYER ────────────────────────────────────────────────── */
+      #${MINI_ID} {
+        position:fixed; z-index:999999;
+        display:flex; align-items:center; gap:6px;
+        padding:6px 10px 6px 8px; border-radius:50px;
+        background:var(--lio-mini-bg,rgba(8,8,20,0.97));
+        border:1px solid var(--lio-border,rgba(200,160,255,0.18));
+        box-shadow:0 4px 20px rgba(0,0,0,0.5);
+        backdrop-filter:blur(14px);
+        font-family:ui-monospace,'Cascadia Code',monospace;
+        cursor:pointer; user-select:none; transition:opacity 0.2s;
+        min-width:160px;
+      }
+      #${MINI_ID}:hover { opacity:0.9; }
+      #${MINI_ID} .mini-dot {
+        width:8px; height:8px; border-radius:50%; background:#303050; flex-shrink:0;
+      }
+      #${MINI_ID} .mini-dot.on {
+        background:var(--lio-accent1,#ff60c0);
+        box-shadow:0 0 7px var(--lio-accent1,#ff60c0);
+        animation:lio-pulse 1.1s ease-in-out infinite;
+      }
+      #${MINI_ID} .mini-canvas-wrap { flex:1; height:20px; overflow:hidden; border-radius:3px; }
+      #${MINI_ID} canvas { display:block; width:100%; height:20px; }
+      #${MINI_ID} .mini-name {
+        font-size:8px; font-weight:700; color:var(--lio-text,#e0e0f0);
+        max-width:80px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+      }
+      #${MINI_ID} .mini-play {
+        font-size:10px; padding:3px 7px; border-radius:20px; cursor:pointer;
+        border:1px solid var(--lio-accent2,#a060ff); background:transparent;
+        color:var(--lio-accent2,#a060ff); font-family:inherit; transition:all 0.14s;
+      }
+      #${MINI_ID} .mini-play:hover { background:var(--lio-accent2,#a060ff); color:#fff; }
+      #${MINI_ID} .mini-expand {
+        font-size:9px; color:var(--lio-text-dim,#6060a0); padding:0 2px; flex-shrink:0;
+      }
     `;
-    document.head.appendChild(style);
+    document.head.appendChild(s);
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // APPLY THEME — flatten theme object into CSS vars on the panel element
-  // ═══════════════════════════════════════════════════════════════════════════
-  function applyThemeToPanel(panel) {
-    const theme = themes[state.theme] || themes.matrix;
-    const accent = state.theme === 'custom' ? state.customColor : theme.accent;
-    const accent2 = state.theme === 'custom' ? state.customColor : theme.accent2;
-
-    panel.style.setProperty('--lio-bg', theme.bg);
-    panel.style.setProperty('--lio-panelBg', theme.panelBg);
-    panel.style.setProperty('--lio-border', theme.border);
-    panel.style.setProperty('--lio-text', theme.text);
-    panel.style.setProperty('--lio-dim', theme.dim);
-    panel.style.setProperty('--lio-accent', accent);
-    panel.style.setProperty('--lio-accent2', accent2);
-    panel.style.setProperty('--lio-vizHi', theme.vizHi);
-    panel.style.setProperty('--lio-vizLo', theme.vizLo);
-    panel.style.setProperty('--lio-handleBg', theme.handleBg);
-    panel.style.setProperty('--lio-font', theme.font);
+  // ── READY ────────────────────────────────────────────────────────────────────
+  function domReady(fn) {
+    if (document.body) fn(); else document.addEventListener('DOMContentLoaded', fn, {once:true});
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // READY CHECK — wait for body before building UI
-  // ═══════════════════════════════════════════════════════════════════════════
-  function ready(fn) {
-    if (document.body) fn();
-    else document.addEventListener('DOMContentLoaded', fn, { once: true });
-  }
-
-  ready(function init() {
+  domReady(function init() {
     if (document.getElementById(PANEL_ID)) return;
     injectCss();
 
-    // ── build the panel DOM ──
+    // ── BUILD PANEL ───────────────────────────────────────────────────────────
     const panel = document.createElement('div');
     panel.id = PANEL_ID;
-    if (state.collapsed) panel.classList.add('lio-collapsed');
-    if (state.miniplayer) panel.classList.add('lio-mini');
-    applyThemeToPanel(panel);
+    if (state.collapsed) panel.classList.add('collapsed');
 
     panel.innerHTML = `
-      <div class="lio-handle"><span class="lio-handle-label">LIO SYNTH</span></div>
-      <div class="lio-inner">
+      <div class="handle"><span class="handle-label">LIO SYNTH</span></div>
+      <div class="inner">
+        <div class="topbar" id="lDrag">
+          <div class="topbar-title">LIO SYNTH v3</div>
+          <div class="topbar-status" id="lTopSt">Ready</div>
+          <button class="topbar-btn" id="lCollBtn">⇄</button>
+        </div>
 
-        <!-- ── FULL CONTENT (hidden in mini mode) ── -->
-        <div class="lio-full-content">
-          <div class="lio-topbar" id="lioDragBar">
-            <div class="lio-topbar-title">Lio Synth v4</div>
-            <div class="lio-topbar-status" id="lioTopStatus">ready</div>
-            <button id="lioMiniBtn" style="padding:2px 6px;font-size:9px;min-width:24px" title="Miniplayer">▢</button>
-            <button id="lioCollapseBtn" style="padding:2px 6px;font-size:9px;min-width:24px" title="Collapse">⇄</button>
+        <div class="tabs" id="lTabs">
+          <div class="tab on"  data-tab="play">▶ Play</div>
+          <div class="tab"     data-tab="sound">Sound</div>
+          <div class="tab"     data-tab="seq">Seq</div>
+          <div class="tab"     data-tab="genres">Genres</div>
+          <div class="tab"     data-tab="build">Build</div>
+          <div class="tab"     data-tab="theme">Theme</div>
+        </div>
+
+        <!-- PLAY -->
+        <div class="pane on" id="lPane-play">
+          <div class="viz-wrap"><canvas id="lCanvas" height="60"></canvas></div>
+
+          <div class="g2" style="margin-bottom:6px">
+            <button id="lPlayBtn" class="btn-play">▶ START</button>
+            <button id="lSongBtn" class="btn-song">♾ Song Mode</button>
           </div>
 
-          <div class="lio-tabs" id="lioTabs">
-            <div class="lio-tab active" data-tab="play">Play</div>
-            <div class="lio-tab" data-tab="sound">Sound</div>
-            <div class="lio-tab" data-tab="seq">Seq</div>
-            <div class="lio-tab" data-tab="genres">Genres</div>
-            <div class="lio-tab" data-tab="build">Build</div>
-            <div class="lio-tab" data-tab="theme">Look</div>
-            <div class="lio-tab" data-tab="live">Live</div>
+          <div class="field">
+            <div class="lbl">Preset</div>
+            <select id="lPresetSel"></select>
           </div>
 
-          <!-- ═══ PLAY TAB ═══ -->
-          <div class="lio-pane active" id="lioPane-play">
-            <div class="lio-viz-wrap"><canvas id="lioCanvas" height="56"></canvas></div>
-            <div class="lio-row" style="margin-bottom:5px">
-              <button id="lioPlayBtn" class="lio-play-btn">▶ START</button>
-              <button id="lioPanicBtn" class="lio-danger">⛔ PANIC</button>
-            </div>
-            <div class="lio-labeled" style="margin-bottom:4px">
-              <div class="lio-label">Genre</div>
-              <select id="lioPresetSel"></select>
-            </div>
-            <div class="lio-slider-row">
-              <div class="lio-slider-header"><span class="lio-slider-name">BPM</span><span class="lio-slider-val" id="lioBpmVal">124</span></div>
-              <input type="range" id="lioBpm" min="40" max="200" step="1">
-            </div>
-            <div class="lio-slider-row">
-              <div class="lio-slider-header"><span class="lio-slider-name">Energy</span><span class="lio-slider-val" id="lioEnergyVal">62%</span></div>
-              <input type="range" id="lioEnergy" min="0" max="1" step="0.01">
-            </div>
-            <div class="lio-slider-row">
-              <div class="lio-slider-header"><span class="lio-slider-name">Volume</span><span class="lio-slider-val" id="lioVolVal">34%</span></div>
-              <input type="range" id="lioVolume" min="0" max="1" step="0.01">
-            </div>
-            <div class="lio-sep"></div>
-            <div class="lio-labeled" style="margin-bottom:4px">
-              <div class="lio-label">Seed (controls the pattern)</div>
-              <input type="text" id="lioSeed" placeholder="e.g. torn-war-777">
-            </div>
-            <div class="lio-row">
-              <button id="lioNewSeedBtn">🎲 New Seed</button>
-              <button id="lioRandomizeBtn" class="lio-accent">✨ Randomize</button>
-            </div>
-            <div class="lio-row" style="margin-top:4px">
-              <button id="lioJamBtn">🎱 Jam</button>
-              <button id="lioSleepBtn" class="lio-accent">💤 Sleep</button>
-            </div>
-            <div class="lio-status-bar">
-              <div class="lio-status-dot" id="lioStatusDot"></div>
-              <span id="lioStatus">tap START to play</span>
-            </div>
+          <div class="sr">
+            <div class="sr-head"><span class="sr-name">BPM</span><span class="sr-val" id="lBpmVal">124</span></div>
+            <input type="range" id="lBpm" min="50" max="200" step="1">
+          </div>
+          <div class="sr">
+            <div class="sr-head"><span class="sr-name">Energy</span><span class="sr-val" id="lEnVal">62%</span></div>
+            <input type="range" id="lEnergy" min="0" max="1" step="0.01">
+          </div>
+          <div class="sr">
+            <div class="sr-head"><span class="sr-name">Volume</span><span class="sr-val" id="lVolVal">34%</span></div>
+            <input type="range" id="lVolume" min="0" max="1" step="0.01">
           </div>
 
-          <!-- ═══ SOUND TAB ═══ -->
-          <div class="lio-pane" id="lioPane-sound">
-            <div class="lio-scroll">
-              <div class="lio-label" style="margin-bottom:3px">Layers</div>
-              <div class="lio-toggle-group four" id="lioLayerToggles">
-                <label class="lio-toggle" id="ltDrums"><input type="checkbox" id="lioDrums"><div class="lio-toggle-dot"></div><span class="lio-toggle-label">Drums</span></label>
-                <label class="lio-toggle" id="ltBass"><input type="checkbox" id="lioBass"><div class="lio-toggle-dot"></div><span class="lio-toggle-label">Bass</span></label>
-                <label class="lio-toggle" id="ltMelody"><input type="checkbox" id="lioMelody"><div class="lio-toggle-dot"></div><span class="lio-toggle-label">Lead</span></label>
-                <label class="lio-toggle" id="ltFx"><input type="checkbox" id="lioFx"><div class="lio-toggle-dot"></div><span class="lio-toggle-label">FX</span></label>
-              </div>
-              <div class="lio-sep"></div>
-              <div class="lio-slider-row">
-                <div class="lio-slider-header"><span class="lio-slider-name">Bass Intensity</span><span class="lio-slider-val" id="lioBassIntVal">70%</span></div>
-                <input type="range" id="lioBassInt" min="0" max="1" step="0.01">
-              </div>
-              <div class="lio-slider-row">
-                <div class="lio-slider-header"><span class="lio-slider-name">Melody Density</span><span class="lio-slider-val" id="lioMelDensVal">50%</span></div>
-                <input type="range" id="lioMelDens" min="0" max="1" step="0.01">
-              </div>
-              <div class="lio-slider-row">
-                <div class="lio-slider-header"><span class="lio-slider-name">Filter Cutoff</span><span class="lio-slider-val" id="lioFilterVal">50%</span></div>
-                <input type="range" id="lioFilter" min="0" max="1" step="0.01">
-              </div>
-              <div class="lio-sep"></div>
-              <div class="lio-label" style="margin-bottom:3px">EQ</div>
-              <div class="lio-eq" style="display:flex;gap:4px;align-items:flex-end;height:40px;margin-bottom:5px">
-                <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;height:100%">
-                  <input type="range" id="lioEqBass" min="0" max="1" step="0.01" style="writing-mode:vertical-lr;direction:rtl;width:3px;flex:1">
-                  <span style="font-size:7px;color:var(--lio-dim)">B</span>
-                </div>
-                <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;height:100%">
-                  <input type="range" id="lioEqLow" min="0" max="1" step="0.01" style="writing-mode:vertical-lr;direction:rtl;width:3px;flex:1">
-                  <span style="font-size:7px;color:var(--lio-dim)">L</span>
-                </div>
-                <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;height:100%">
-                  <input type="range" id="lioEqMid" min="0" max="1" step="0.01" style="writing-mode:vertical-lr;direction:rtl;width:3px;flex:1">
-                  <span style="font-size:7px;color:var(--lio-dim)">M</span>
-                </div>
-                <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;height:100%">
-                  <input type="range" id="lioEqHigh" min="0" max="1" step="0.01" style="writing-mode:vertical-lr;direction:rtl;width:3px;flex:1">
-                  <span style="font-size:7px;color:var(--lio-dim)">H</span>
-                </div>
-                <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;height:100%">
-                  <input type="range" id="lioEqAir" min="0" max="1" step="0.01" style="writing-mode:vertical-lr;direction:rtl;width:3px;flex:1">
-                  <span style="font-size:7px;color:var(--lio-dim)">A</span>
-                </div>
-              </div>
-              <div class="lio-sep"></div>
-              <div class="lio-label" style="margin-bottom:3px">FX Chain</div>
-              <div class="lio-toggle-group">
-                <label class="lio-toggle" id="ltReverb"><input type="checkbox" id="lioReverb"><div class="lio-toggle-dot"></div><span class="lio-toggle-label">Reverb</span></label>
-                <label class="lio-toggle" id="ltViz"><input type="checkbox" id="lioViz"><div class="lio-toggle-dot"></div><span class="lio-toggle-label">Visualizer</span></label>
-              </div>
-              <div class="lio-slider-row" style="margin-top:4px">
-                <div class="lio-slider-header"><span class="lio-slider-name">Reverb Wet</span><span class="lio-slider-val" id="lioRevVal">18%</span></div>
-                <input type="range" id="lioRevWet" min="0" max="1" step="0.01">
-              </div>
-              <div class="lio-sep"></div>
-              <div class="lio-label" style="margin-bottom:3px">Arp / Chords</div>
-              <div class="lio-toggle-group">
-                <label class="lio-toggle" id="ltArp"><input type="checkbox" id="lioArp"><div class="lio-toggle-dot"></div><span class="lio-toggle-label">Arp</span></label>
-                <label class="lio-toggle" id="ltChord"><input type="checkbox" id="lioChord"><div class="lio-toggle-dot"></div><span class="lio-toggle-label">Chord</span></label>
-              </div>
-              <div class="lio-row" style="margin-top:4px">
-                <div class="lio-labeled">
-                  <div class="lio-label">Arp Rate</div>
-                  <select id="lioArpRate"><option value="1">1/16</option><option value="2">1/8</option><option value="4">1/4</option><option value="0.5">1/32</option></select>
-                </div>
-                <div class="lio-labeled">
-                  <div class="lio-label">Voicing</div>
-                  <select id="lioVoicing"></select>
-                </div>
-              </div>
-              <div class="lio-sep"></div>
-              <div class="lio-label" style="margin-bottom:3px">Song Mode</div>
-              <div class="lio-toggle-group">
-                <label class="lio-toggle" id="ltSong"><input type="checkbox" id="lioSongMode"><div class="lio-toggle-dot"></div><span class="lio-toggle-label">Song Mode</span></label>
-                <div class="lio-labeled"><div class="lio-label">Drift Speed</div>
-                  <select id="lioSongSpeed"><option value="0.2">Slow</option><option value="0.5">Med</option><option value="1">Fast</option></select>
-                </div>
-              </div>
-              <div style="font-size:7px;color:var(--lio-dim);margin-top:3px">knobs drift on their own over time</div>
-            </div>
+          <div class="sep"></div>
+
+          <div class="field">
+            <div class="lbl">Seed</div>
+            <input type="text" id="lSeed" placeholder="torn-war-777">
           </div>
 
-          <!-- ═══ SEQUENCER TAB ═══ -->
-          <div class="lio-pane" id="lioPane-seq">
-            <div class="lio-label" style="margin-bottom:3px">Drum Pattern</div>
-            <select id="lioPatternSel" style="margin-bottom:5px;width:100%"></select>
-            <div class="lio-seq" id="lioSeqEdit">
-              <div class="lio-seq-row" id="lioSeqKick"><span class="lio-seq-name">Kick</span></div>
-              <div class="lio-seq-row" id="lioSeqSnare"><span class="lio-seq-name">Snare</span></div>
-              <div class="lio-seq-row" id="lioSeqHat"><span class="lio-seq-name">Hat</span></div>
-              <div class="lio-seq-row" id="lioSeqOhat"><span class="lio-seq-name">OHat</span></div>
-            </div>
-            <div class="lio-row">
-              <button id="lioSeqSaveBtn" class="lio-accent">💾 Save</button>
-              <button id="lioSeqRandBtn">🎲 Random</button>
-            </div>
-            <div class="lio-slider-row" style="margin-top:6px">
-              <div class="lio-slider-header"><span class="lio-slider-name">Swing</span><span class="lio-slider-val" id="lioSwingVal">4%</span></div>
-              <input type="range" id="lioSwing" min="0" max="0.4" step="0.01">
-            </div>
+          <div class="g2">
+            <button id="lNewSeed">🎲 New Seed</button>
+            <button id="lRandomize" class="btn-accent">✨ Randomize</button>
+          </div>
+          <div class="g2" style="margin-top:3px">
+            <button id="lPanicBtn" class="btn-danger">⛔ Panic</button>
+            <button id="lMiniToggle" class="btn-accent">⊟ Miniplayer</button>
           </div>
 
-          <!-- ═══ GENRES TAB ═══ -->
-          <div class="lio-pane" id="lioPane-genres">
-            <div class="lio-scroll" id="lioPresetCards"></div>
+          <div class="status-bar">
+            <div class="status-dot" id="lDot"></div>
+            <span id="lStatus">Tap ▶ START to play</span>
           </div>
+        </div>
 
-          <!-- ═══ BUILD TAB ═══ -->
-          <div class="lio-pane" id="lioPane-build">
-            <div class="lio-scroll">
-              <div style="font-size:8px;color:var(--lio-dim);margin-bottom:5px">Create your own genre. Save it, use it, delete it.</div>
-              <div class="lio-labeled" style="margin-bottom:4px"><div class="lio-label">Name</div><input type="text" id="cbName" placeholder="My Genre"></div>
-              <div class="lio-row">
-                <div class="lio-labeled"><div class="lio-label">Root</div><select id="cbRoot"></select></div>
-                <div class="lio-labeled"><div class="lio-label">Scale</div><select id="cbScale"></select></div>
-              </div>
-              <div class="lio-row">
-                <div class="lio-labeled"><div class="lio-label">BPM</div><input type="number" id="cbBpm" placeholder="120" min="40" max="200"></div>
-                <div class="lio-labeled"><div class="lio-label">Swing</div><input type="text" id="cbSwing" placeholder="0.05"></div>
-              </div>
-              <div class="lio-row">
-                <div class="lio-labeled"><div class="lio-label">Lead Wave</div>
-                  <select id="cbWave"><option value="sine">Sine</option><option value="sawtooth">Saw</option><option value="square">Square</option><option value="triangle">Tri</option></select>
-                </div>
-                <div class="lio-labeled"><div class="lio-label">Bass Wave</div>
-                  <select id="cbBassWave"><option value="sine">Sine</option><option value="sawtooth">Saw</option><option value="square">Square</option><option value="triangle">Tri</option></select>
-                </div>
-              </div>
-              <div class="lio-labeled" style="margin-bottom:4px"><div class="lio-label">Chords (degrees, comma-sep)</div><input type="text" id="cbChords" placeholder="0,5,3,6"></div>
-              <div class="lio-row">
-                <div class="lio-labeled"><div class="lio-label">Drums</div><select id="cbDrum"></select></div>
-                <div class="lio-labeled"><div class="lio-label">Tag</div><select id="cbGenre"></select></div>
-              </div>
-              <div class="lio-row">
-                <div class="lio-labeled"><div class="lio-label">Reverb</div><input type="text" id="cbReverb" placeholder="0.2"></div>
-                <div class="lio-labeled"><div class="lio-label">Filter</div><input type="text" id="cbFilter" placeholder="0.5"></div>
-              </div>
-              <div class="lio-row">
-                <div class="lio-labeled"><div class="lio-label">Bass Int</div><input type="text" id="cbBassInt" placeholder="0.7"></div>
-                <div class="lio-labeled"><div class="lio-label">Mel Density</div><input type="text" id="cbMelDens" placeholder="0.5"></div>
-              </div>
-              <div class="lio-row" style="margin-top:4px">
-                <button id="cbSaveBtn" class="lio-accent">💾 Save</button>
-                <button id="cbLoadBtn">⬆ Load Current</button>
-              </div>
-              <div id="cbStatus" style="font-size:8px;color:var(--lio-dim);margin-top:3px;min-height:14px"></div>
-              <div class="lio-sep"></div>
-              <div class="lio-row">
-                <button id="cbExportBtn">📤 Export All</button>
-                <button id="cbImportBtn">📥 Import</button>
-              </div>
-              <div id="cbImportArea" style="display:none;margin-top:4px">
-                <textarea id="cbImportText" style="width:100%;height:60px;font-size:8px;background:rgba(128,128,128,0.06);border:1px solid rgba(128,128,128,0.15);border-radius:5px;color:var(--lio-text);padding:4px;resize:vertical" placeholder="paste JSON here"></textarea>
-                <button id="cbImportDoBtn" class="lio-accent" style="margin-top:3px">Import Now</button>
-              </div>
-              <div class="lio-sep"></div>
-              <div class="lio-label" style="margin-bottom:3px">My Genres</div>
-              <div id="lioCustomGenreList"></div>
+        <!-- SOUND -->
+        <div class="pane" id="lPane-sound">
+          <div class="scroll">
+            <div class="lbl">Layers</div>
+            <div class="tg-group four">
+              <label class="tg" id="tDrums"><input type="checkbox" id="lDrums"><div class="tg-dot"></div><span class="tg-lbl">Drums</span></label>
+              <label class="tg" id="tBass"><input type="checkbox" id="lBass"><div class="tg-dot"></div><span class="tg-lbl">Bass</span></label>
+              <label class="tg" id="tMelody"><input type="checkbox" id="lMelody"><div class="tg-dot"></div><span class="tg-lbl">Lead</span></label>
+              <label class="tg" id="tFx"><input type="checkbox" id="lFx"><div class="tg-dot"></div><span class="tg-lbl">FX</span></label>
             </div>
-          </div>
-
-          <!-- ═══ THEME TAB ═══ -->
-          <div class="lio-pane" id="lioPane-theme">
-            <div class="lio-scroll">
-              <div class="lio-label" style="margin-bottom:3px">Theme</div>
-              <div class="lio-color-row" id="lioThemeSwatches"></div>
-              <div class="lio-label" style="margin-bottom:3px;margin-top:6px">Custom Color</div>
-              <div class="lio-color-row">
-                <input type="color" id="lioCustomColor" value="${state.customColor}">
-                <button id="lioApplyCustomBtn" class="lio-accent" style="flex:1">Apply Custom</button>
-              </div>
-              <div class="lio-sep"></div>
-              <div class="lio-label" style="margin-bottom:3px">Visualizer Mode</div>
-              <select id="lioVizMode">
-                <option value="bars">Bars</option>
-                <option value="wave">Waveform</option>
-                <option value="circle">Circular</option>
-                <option value="off">Off</option>
-              </select>
-              <div class="lio-sep"></div>
-              <div class="lio-label" style="margin-bottom:3px">Sleep Timer (minutes)</div>
-              <select id="lioSleepSel">
-                <option value="0">Off</option>
-                <option value="5">5 min</option>
-                <option value="10">10 min</option>
-                <option value="15">15 min</option>
-                <option value="30">30 min</option>
-                <option value="60">1 hour</option>
-              </select>
-              <div id="lioSleepStatus" style="font-size:7px;color:var(--lio-dim);margin-top:3px"></div>
+            <div class="sep"></div>
+            <div class="sr">
+              <div class="sr-head"><span class="sr-name">Bass Intensity</span><span class="sr-val" id="lBassIntVal">70%</span></div>
+              <input type="range" id="lBassInt" min="0" max="1" step="0.01">
             </div>
-          </div>
-
-          <!-- ═══ LIVE TAB (v4 — Torn API) ═══ -->
-          <div class="lio-pane" id="lioPane-live">
-            <div class="lio-scroll">
-              <div style="font-size:9px;color:var(--lio-dim);margin-bottom:5px">
-                Connect to your Torn status. Music responds to your game state in real time.
+            <div class="sr">
+              <div class="sr-head"><span class="sr-name">Melody Density</span><span class="sr-val" id="lMelDVal">50%</span></div>
+              <input type="range" id="lMelDens" min="0" max="1" step="0.01">
+            </div>
+            <div class="sr">
+              <div class="sr-head"><span class="sr-name">Filter Cutoff</span><span class="sr-val" id="lFiltVal">50%</span></div>
+              <input type="range" id="lFilter" min="0" max="1" step="0.01">
+            </div>
+            <div class="sep"></div>
+            <div class="lbl">5-Band EQ</div>
+            <div class="eq">
+              <div class="eq-band"><input type="range" id="lEqB" min="0" max="1" step="0.01" orient="vertical"><span>Bass</span></div>
+              <div class="eq-band"><input type="range" id="lEqL" min="0" max="1" step="0.01" orient="vertical"><span>Low</span></div>
+              <div class="eq-band"><input type="range" id="lEqM" min="0" max="1" step="0.01" orient="vertical"><span>Mid</span></div>
+              <div class="eq-band"><input type="range" id="lEqH" min="0" max="1" step="0.01" orient="vertical"><span>High</span></div>
+              <div class="eq-band"><input type="range" id="lEqA" min="0" max="1" step="0.01" orient="vertical"><span>Air</span></div>
+            </div>
+            <div class="sep"></div>
+            <div class="lbl">FX</div>
+            <div class="tg-group">
+              <label class="tg" id="tRev"><input type="checkbox" id="lRev"><div class="tg-dot"></div><span class="tg-lbl">Reverb</span></label>
+              <label class="tg" id="tViz"><input type="checkbox" id="lViz"><div class="tg-dot"></div><span class="tg-lbl">Visualizer</span></label>
+            </div>
+            <div class="sr" style="margin-top:4px">
+              <div class="sr-head"><span class="sr-name">Reverb Wet</span><span class="sr-val" id="lRevVal">18%</span></div>
+              <input type="range" id="lRevWet" min="0" max="1" step="0.01">
+            </div>
+            <div class="sep"></div>
+            <div class="lbl">Arp / Chord</div>
+            <div class="tg-group">
+              <label class="tg" id="tArp"><input type="checkbox" id="lArp"><div class="tg-dot"></div><span class="tg-lbl">Arp</span></label>
+              <label class="tg" id="tChord"><input type="checkbox" id="lChord"><div class="tg-dot"></div><span class="tg-lbl">Chords</span></label>
+            </div>
+            <div class="g2" style="margin-top:4px">
+              <div class="field"><div class="lbl">Arp Rate</div>
+                <select id="lArpRate">
+                  <option value="0.5">1/32</option><option value="1">1/16</option>
+                  <option value="2">1/8</option><option value="4">1/4</option>
+                </select>
               </div>
-
-              <div class="lio-label" style="margin-bottom:3px">Torn API Key</div>
-              <div class="lio-row" style="margin-bottom:5px">
-                <input type="text" id="lioTornKey" placeholder="your torn api key" style="flex:1">
-                <button id="lioTornKeySaveBtn" class="lio-accent">Save</button>
-              </div>
-
-              <div class="lio-toggle-group" style="margin-bottom:6px">
-                <label class="lio-toggle" id="ltTornMode">
-                  <input type="checkbox" id="lioTornMode">
-                  <div class="lio-toggle-dot"></div>
-                  <span class="lio-toggle-label">Torn Mode</span>
-                </label>
-                <div class="lio-labeled">
-                  <div class="lio-label">Intensity</div>
-                  <select id="lioTornIntensity">
-                    <option value="0.3">Subtle</option>
-                    <option value="0.5">Medium</option>
-                    <option value="0.7">Strong</option>
-                    <option value="1.0">Full</option>
-                  </select>
-                </div>
-              </div>
-
-              <div class="lio-sep"></div>
-              <div class="lio-label" style="margin-bottom:3px">What affects the music</div>
-
-              <div class="lio-toggle-group three" style="margin-bottom:4px">
-                <label class="lio-toggle" id="ltTornEnergy">
-                  <input type="checkbox" id="lioTornMapEnergy">
-                  <div class="lio-toggle-dot"></div>
-                  <span class="lio-toggle-label">Energy</span>
-                </label>
-                <label class="lio-toggle" id="ltTornNerve">
-                  <input type="checkbox" id="lioTornMapNerve">
-                  <div class="lio-toggle-dot"></div>
-                  <span class="lio-toggle-label">Nerve</span>
-                </label>
-                <label class="lio-toggle" id="ltTornHappy">
-                  <input type="checkbox" id="lioTornMapHappy">
-                  <div class="lio-toggle-dot"></div>
-                  <span class="lio-toggle-label">Happy</span>
-                </label>
-              </div>
-              <div class="lio-toggle-group three" style="margin-bottom:4px">
-                <label class="lio-toggle" id="ltTornLife">
-                  <input type="checkbox" id="lioTornMapLife">
-                  <div class="lio-toggle-dot"></div>
-                  <span class="lio-toggle-label">Life</span>
-                </label>
-                <label class="lio-toggle" id="ltTornCd">
-                  <input type="checkbox" id="lioTornMapCooldowns">
-                  <div class="lio-toggle-dot"></div>
-                  <span class="lio-toggle-label">Cooldowns</span>
-                </label>
-                <label class="lio-toggle" id="ltTornStatus">
-                  <input type="checkbox" id="lioTornMapStatus">
-                  <div class="lio-toggle-dot"></div>
-                  <span class="lio-toggle-label">Status</span>
-                </label>
-              </div>
-              <div class="lio-toggle-group" style="margin-bottom:4px">
-                <label class="lio-toggle" id="ltTornTravel">
-                  <input type="checkbox" id="lioTornMapTravel">
-                  <div class="lio-toggle-dot"></div>
-                  <span class="lio-toggle-label">Travel</span>
-                </label>
-                <label class="lio-toggle" id="ltTornMoney">
-                  <input type="checkbox" id="lioTornMapMoney">
-                  <div class="lio-toggle-dot"></div>
-                  <span class="lio-toggle-label">Money</span>
-                </label>
-              </div>
-
-              <div class="lio-sep"></div>
-              <div class="lio-label" style="margin-bottom:3px">Current Status</div>
-              <div id="lioTornStatus" style="font-size:9px;color:var(--lio-dim);min-height:60px;padding:5px;background:rgba(128,128,128,0.05);border-radius:6px;border:1px solid rgba(128,128,128,0.08)">
-                <div style="color:var(--lio-dim)">not connected. add your api key above.</div>
-              </div>
-
-              <div class="lio-sep"></div>
-              <div style="font-size:8px;color:var(--lio-dim);line-height:1.4">
-                <b style="color:var(--lio-accent)">How it works:</b><br>
-                Energy -> song energy (more energy = more intense)<br>
-                Nerve -> melody density (high nerve = busier lead)<br>
-                Happy -> filter cutoff (happier = brighter)<br>
-                Life -> bass weight (low life = darker)<br>
-                Drug CD -> reverb swell + slower tempo<br>
-                Medical CD -> dampened highs<br>
-                Booster CD -> tempo boost + swing<br>
-                Jail -> sparse drums, minor key<br>
-                Hospital -> ambient, no drums<br>
-                Flying -> reverb + delay swell<br>
-                Cash -> tempo + brightness
+              <div class="field"><div class="lbl">Voicing</div>
+                <select id="lVoicing">
+                  <option value="triad">Triad</option><option value="seventh">7th</option>
+                  <option value="sus2">Sus2</option><option value="sus4">Sus4</option>
+                  <option value="power">Power</option><option value="shell">Shell</option>
+                </select>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- ── MINI PLAYER CONTENT ── -->
-        <div class="lio-mini-content">
-          <div class="lio-mini-viz"><canvas id="lioMiniCanvas" height="32"></canvas></div>
-          <div class="lio-row">
-            <button id="lioMiniPlayBtn" class="lio-play-btn" style="flex:1">▶</button>
-            <button id="lioMiniExpandBtn" style="padding:3px 8px;font-size:10px">⇔</button>
+        <!-- SEQ -->
+        <div class="pane" id="lPane-seq">
+          <div class="field">
+            <div class="lbl">Pattern</div>
+            <select id="lPatSel"></select>
           </div>
-          <div id="lioMiniStatus" style="font-size:7px;color:var(--lio-dim);text-align:center;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
+          <div id="lSeq" style="margin-bottom:5px">
+            <div class="seq-row" id="lSeqKick"><span class="seq-name">Kick</span></div>
+            <div class="seq-row" id="lSeqSnare"><span class="seq-name">Snare</span></div>
+            <div class="seq-row" id="lSeqHat"><span class="seq-name">HiHat</span></div>
+            <div class="seq-row" id="lSeqOhat"><span class="seq-name">OHat</span></div>
+          </div>
+          <div class="g2">
+            <button id="lSeqSave" class="btn-accent">💾 Save Pattern</button>
+            <button id="lSeqRand">🎲 Randomize</button>
+          </div>
+          <div class="sr" style="margin-top:7px">
+            <div class="sr-head"><span class="sr-name">Swing</span><span class="sr-val" id="lSwingVal">4%</span></div>
+            <input type="range" id="lSwing" min="0" max="0.4" step="0.01">
+          </div>
         </div>
 
+        <!-- GENRES -->
+        <div class="pane" id="lPane-genres">
+          <div class="scroll" id="lPCards"></div>
+        </div>
+
+        <!-- BUILD -->
+        <div class="pane" id="lPane-build">
+          <div class="scroll">
+            <div style="font-size:8px;color:var(--lio-text-dim);margin-bottom:5px">Design a custom genre and save it permanently.</div>
+            <div class="field"><div class="lbl">Name</div><input type="text" id="cName" placeholder="My Banger"></div>
+            <div class="g2">
+              <div class="field"><div class="lbl">Root Note</div><select id="cRoot"></select></div>
+              <div class="field"><div class="lbl">Scale</div><select id="cScale"></select></div>
+            </div>
+            <div class="g2">
+              <div class="field"><div class="lbl">BPM</div><input type="text" id="cBpm" placeholder="120"></div>
+              <div class="field"><div class="lbl">Swing</div><input type="text" id="cSwing" placeholder="0.05"></div>
+            </div>
+            <div class="g2">
+              <div class="field"><div class="lbl">Lead Wave</div>
+                <select id="cWave"><option value="sine">Sine</option><option value="sawtooth">Saw</option><option value="square">Square</option><option value="triangle">Triangle</option></select>
+              </div>
+              <div class="field"><div class="lbl">Bass Wave</div>
+                <select id="cBassWave"><option value="sine">Sine</option><option value="sawtooth">Saw</option><option value="square">Square</option><option value="triangle">Triangle</option></select>
+              </div>
+            </div>
+            <div class="field"><div class="lbl">Chord Degrees (comma-sep)</div><input type="text" id="cChords" placeholder="0,5,3,6"></div>
+            <div class="g2">
+              <div class="field"><div class="lbl">Drum Pattern</div><select id="cDrum"></select></div>
+              <div class="field"><div class="lbl">Genre Tag</div>
+                <select id="cGenre"><option value="custom">Custom</option><option value="cyberpunk">Cyberpunk</option><option value="lofi">Lo-Fi</option><option value="electronic">Electronic</option><option value="ambient">Ambient</option><option value="synthwave">Synthwave</option><option value="jazz">Jazz</option><option value="trap">Trap</option><option value="blues">Blues</option><option value="citypop">City Pop</option><option value="metal">Metal</option></select>
+              </div>
+            </div>
+            <div class="g2">
+              <div class="field"><div class="lbl">Reverb (0–1)</div><input type="text" id="cRev" placeholder="0.2"></div>
+              <div class="field"><div class="lbl">Filter (0–1)</div><input type="text" id="cFilt" placeholder="0.5"></div>
+            </div>
+            <div class="g2">
+              <div class="field"><div class="lbl">Bass Int.</div><input type="text" id="cBassInt" placeholder="0.7"></div>
+              <div class="field"><div class="lbl">Melody Dens.</div><input type="text" id="cMelD" placeholder="0.5"></div>
+            </div>
+            <div class="g2">
+              <button id="cSave" class="btn-accent">💾 Save Genre</button>
+              <button id="cLoad">⬆ Load Current</button>
+            </div>
+            <div id="cStatus" style="font-size:8px;color:var(--lio-text-dim);margin-top:3px;min-height:14px"></div>
+            <div class="sep"></div>
+            <div class="lbl">My Custom Genres</div>
+            <div id="lCustomList"></div>
+          </div>
+        </div>
+
+        <!-- THEME -->
+        <div class="pane" id="lPane-theme">
+          <div class="scroll">
+            <div class="lbl">Theme</div>
+            <div class="swatches" id="lSwatches"></div>
+
+            <div id="lCustomThemeFields" style="display:none">
+              <div class="g2">
+                <div class="field">
+                  <div class="lbl">Accent Color</div>
+                  <div style="display:flex;gap:5px;align-items:center">
+                    <input type="color" id="lAccentColor" value="#9060ff">
+                    <input type="text" id="lAccentHex" placeholder="#9060ff" style="flex:1">
+                  </div>
+                </div>
+                <div class="field">
+                  <div class="lbl">BG Opacity</div>
+                  <div class="sr" style="margin-bottom:0">
+                    <div class="sr-head"><span class="sr-name"></span><span class="sr-val" id="lBgOpVal">97%</span></div>
+                    <input type="range" id="lBgOp" min="0.5" max="1" step="0.01">
+                  </div>
+                </div>
+              </div>
+              <button id="lApplyCustomTheme" class="btn-accent" style="width:100%;margin-top:3px">Apply Custom Theme</button>
+            </div>
+
+            <div class="sep"></div>
+
+            <!-- SONG MODE in Theme tab (separate section) -->
+            <div class="lbl">♾ Song Mode</div>
+            <div class="song-panel">
+              <div style="font-size:8px;color:#9a8030;margin-bottom:6px;line-height:1.4">
+                When on, all sliders drift slowly on their own — like a living soundscape. Inspired by mynoise.net. You can still grab any slider to override it; it resumes modulating after 8 seconds.
+              </div>
+              <div class="song-vis"><canvas id="lSongCanvas" height="18"></canvas></div>
+              <div class="g2">
+                <button id="lSongToggle2" class="btn-song">♾ Song Mode</button>
+                <div></div>
+              </div>
+              <div class="sep" style="border-color:rgba(255,200,40,0.1)"></div>
+              <div class="sr">
+                <div class="sr-head"><span class="sr-name">Speed (cycle secs)</span><span class="sr-val" id="lSongSpVal">30s</span></div>
+                <input type="range" id="lSongSp" min="5" max="120" step="1">
+              </div>
+              <div class="sr">
+                <div class="sr-head"><span class="sr-name">Depth</span><span class="sr-val" id="lSongDepVal">35%</span></div>
+                <input type="range" id="lSongDep" min="0" max="1" step="0.01">
+              </div>
+              <div class="sr">
+                <div class="sr-head"><span class="sr-name">Turbulence</span><span class="sr-val" id="lSongTurbVal">20%</span></div>
+                <input type="range" id="lSongTurb" min="0" max="1" step="0.01">
+              </div>
+              <div class="lbl" style="margin-top:4px">Modulate</div>
+              <div class="tg-group four" id="lSongToggles">
+                <label class="tg on" id="stEnergy"><input type="checkbox" checked><div class="tg-dot"></div><span class="tg-lbl">Energy</span></label>
+                <label class="tg on" id="stFilter"><input type="checkbox" checked><div class="tg-dot"></div><span class="tg-lbl">Filter</span></label>
+                <label class="tg on" id="stRev"><input type="checkbox" checked><div class="tg-dot"></div><span class="tg-lbl">Reverb</span></label>
+                <label class="tg on" id="stBassInt"><input type="checkbox" checked><div class="tg-dot"></div><span class="tg-lbl">Bass</span></label>
+                <label class="tg on" id="stMelDens"><input type="checkbox" checked><div class="tg-dot"></div><span class="tg-lbl">Melody</span></label>
+                <label class="tg"   id="stBpm"><input type="checkbox"><div class="tg-dot"></div><span class="tg-lbl">BPM</span></label>
+                <label class="tg on" id="stEq"><input type="checkbox" checked><div class="tg-dot"></div><span class="tg-lbl">EQ</span></label>
+                <label class="tg"   id="stVol"><input type="checkbox"><div class="tg-dot"></div><span class="tg-lbl">Volume</span></label>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     `;
 
     document.body.appendChild(panel);
 
-    // ── grab DOM refs ──
-    const el = (id) => panel.querySelector(id);
-    const dragBar = el('#lioDragBar');
-    const collapseBtn = el('#lioCollapseBtn');
-    const miniBtn = el('#lioMiniBtn');
-    const tabs = panel.querySelectorAll('.lio-tab');
-    const playBtn = el('#lioPlayBtn');
-    const panicBtn = el('#lioPanicBtn');
-    const presetSel = el('#lioPresetSel');
-    const bpmInput = el('#lioBpm');
-    const energyInput = el('#lioEnergy');
-    const volumeInput = el('#lioVolume');
-    const seedInput = el('#lioSeed');
-    const newSeedBtn = el('#lioNewSeedBtn');
-    const randomizeBtn = el('#lioRandomizeBtn');
-    const jamBtn = el('#lioJamBtn');
-    const sleepBtn = el('#lioSleepBtn');
-    const statusEl = el('#lioStatus');
-    const statusDot = el('#lioStatusDot');
-    const topStatus = el('#lioTopStatus');
-    const canvas = el('#lioCanvas');
-    const ctx2d = canvas.getContext('2d');
-    const miniCanvas = el('#lioMiniCanvas');
-    const miniCtx = miniCanvas.getContext('2d');
-    const miniPlayBtn = el('#lioMiniPlayBtn');
-    const miniExpandBtn = el('#lioMiniExpandBtn');
-    const miniStatus = el('#lioMiniStatus');
+    // ── BUILD MINIPLAYER ──────────────────────────────────────────────────────
+    const mini = document.createElement('div');
+    mini.id = MINI_ID;
+    mini.innerHTML = `
+      <div class="mini-dot" id="lMiniDot"></div>
+      <div class="mini-canvas-wrap"><canvas id="lMiniCanvas" height="20"></canvas></div>
+      <span class="mini-name" id="lMiniName">Neon War Chain</span>
+      <button class="mini-play" id="lMiniPlay">▶</button>
+      <span class="mini-expand">⊞</span>
+    `;
+    document.body.appendChild(mini);
 
-    // sound tab
-    const drumsChk = el('#lioDrums'), bassChk = el('#lioBass'), melodyChk = el('#lioMelody'), fxChk = el('#lioFx');
-    const reverbChk = el('#lioReverb'), vizChk = el('#lioViz');
-    const bassIntInput = el('#lioBassInt'), melDensInput = el('#lioMelDens'), filterInput = el('#lioFilter');
-    const revWetInput = el('#lioRevWet'), arpChk = el('#lioArp'), chordChk = el('#lioChord');
-    const arpRateSel = el('#lioArpRate'), voicingSel = el('#lioVoicing');
-    const eqBassIn = el('#lioEqBass'), eqLowIn = el('#lioEqLow'), eqMidIn = el('#lioEqMid'), eqHighIn = el('#lioEqHigh'), eqAirIn = el('#lioEqAir');
-    const songModeChk = el('#lioSongMode'), songSpeedSel = el('#lioSongSpeed');
+    // ── DOM REFS ─────────────────────────────────────────────────────────────
+    const $ = id => panel.querySelector('#'+id);
+    const handle    = panel.querySelector('.handle');
+    const dragBar   = $('lDrag');
+    const tabs      = panel.querySelectorAll('.tab');
+    const playBtn   = $('lPlayBtn');
+    const songBtn   = $('lSongBtn');
+    const panicBtn  = $('lPanicBtn');
+    const presetSel = $('lPresetSel');
+    const bpmIn     = $('lBpm');  const bpmVal   = $('lBpmVal');
+    const enIn      = $('lEnergy'); const enVal  = $('lEnVal');
+    const volIn     = $('lVolume'); const volVal  = $('lVolVal');
+    const seedIn    = $('lSeed');
+    const newSeedB  = $('lNewSeed');
+    const randB     = $('lRandomize');
+    const statusEl  = $('lStatus');
+    const statusDot = $('lDot');
+    const topSt     = $('lTopSt');
+    const canvas    = $('lCanvas');
+    const ctx2d     = canvas.getContext('2d');
+    const miniBtn   = $('lMiniToggle');
+    const colBtn    = $('lCollBtn');
 
-    // sequencer
-    const patternSel = el('#lioPatternSel');
-    const swingInput = el('#lioSwing');
-    const seqSaveBtn = el('#lioSeqSaveBtn'), seqRandBtn = el('#lioSeqRandBtn');
+    // Sound
+    const drumsChk  = $('lDrums'); const bassChk = $('lBass');
+    const melChk    = $('lMelody'); const fxChk  = $('lFx');
+    const revChk    = $('lRev');    const vizChk  = $('lViz');
+    const arpChk    = $('lArp');    const chordChk= $('lChord');
+    const bassIntIn = $('lBassInt'); const bassIntV= $('lBassIntVal');
+    const melDIn    = $('lMelDens'); const melDV  = $('lMelDVal');
+    const filtIn    = $('lFilter');  const filtV   = $('lFiltVal');
+    const revWetIn  = $('lRevWet');  const revV    = $('lRevVal');
+    const arpRateS  = $('lArpRate'); const voicS   = $('lVoicing');
+    const eqBIn=$('lEqB'); const eqLIn=$('lEqL'); const eqMIn=$('lEqM');
+    const eqHIn=$('lEqH'); const eqAIn=$('lEqA');
 
-    // builder
-    const cbName = el('#cbName'), cbRoot = el('#cbRoot'), cbScale = el('#cbScale');
-    const cbBpm = el('#cbBpm'), cbSwing = el('#cbSwing'), cbWave = el('#cbWave'), cbBassWave = el('#cbBassWave');
-    const cbChords = el('#cbChords'), cbDrum = el('#cbDrum'), cbGenre = el('#cbGenre');
-    const cbReverb = el('#cbReverb'), cbFilter = el('#cbFilter'), cbBassInt = el('#cbBassInt'), cbMelDens = el('#cbMelDens');
-    const cbSaveBtn = el('#cbSaveBtn'), cbLoadBtn = el('#cbLoadBtn'), cbStatus = el('#cbStatus');
-    const cbExportBtn = el('#cbExportBtn'), cbImportBtn = el('#cbImportBtn');
-    const cbImportArea = el('#cbImportArea'), cbImportText = el('#cbImportText'), cbImportDoBtn = el('#cbImportDoBtn');
+    // Seq
+    const patSel    = $('lPatSel');
+    const swingIn   = $('lSwing');   const swingV   = $('lSwingVal');
+    const seqSave   = $('lSeqSave'); const seqRand  = $('lSeqRand');
 
-    // theme
-    const themeSwatches = el('#lioThemeSwatches');
-    const customColorInput = el('#lioCustomColor');
-    const applyCustomBtn = el('#lioApplyCustomBtn');
-    const vizModeSel = el('#lioVizMode');
-    const sleepSel = el('#lioSleepSel');
-    const sleepStatus = el('#lioSleepStatus');
+    // Build
+    const cName=$('cName'); const cRoot=$('cRoot'); const cScale=$('cScale');
+    const cBpm=$('cBpm'); const cSwing=$('cSwing'); const cWave=$('cWave');
+    const cBassWave=$('cBassWave'); const cChords=$('cChords');
+    const cDrum=$('cDrum'); const cGenre=$('cGenre');
+    const cRev=$('cRev'); const cFilt=$('cFilt');
+    const cBassInt=$('cBassInt'); const cMelD=$('cMelD');
+    const cSave=$('cSave'); const cLoad=$('cLoad');
+    const cStatus=$('cStatus'); const customList=$('lCustomList');
 
-    const customListEl = el('#lioCustomGenreList');
-    const presetCardsEl = el('#lioPresetCards');
+    // Theme
+    const swatchCont=$('lSwatches');
+    const customFields=$('lCustomThemeFields');
+    const accentColor=$('lAccentColor'); const accentHex=$('lAccentHex');
+    const bgOpIn=$('lBgOp'); const bgOpV=$('lBgOpVal');
+    const applyCustom=$('lApplyCustomTheme');
 
-    // live drum pattern (copied from built-in on load)
-    let livePattern = JSON.parse(JSON.stringify(drumPatterns[state.drumPattern] || drumPatterns.standard));
+    // Song mode
+    const songSp=$('lSongSp'); const songSpV=$('lSongSpVal');
+    const songDep=$('lSongDep'); const songDepV=$('lSongDepVal');
+    const songTurb=$('lSongTurb'); const songTurbV=$('lSongTurbVal');
+    const songTgl2=$('lSongToggle2');
+    const songCanvas=$('lSongCanvas');
+    const songCtx=songCanvas.getContext('2d');
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // AUDIO ENGINE
-    // ═══════════════════════════════════════════════════════════════════════════
-    let audioCtx = null, master = null, analyser = null, analyserData = null;
-    let convolver = null, reverbWet = null, reverbDry = null;
-    let eqFilters = [];
-    let noiseBuffer = null;
-    let isPlaying = false, timer = null, currentStep = 0, nextNoteTime = 0;
-    let rng = mulberry32(hashString(state.seed + state.preset));
-    let arpPhase = 0;
-    let sleepTimerId = null, sleepFadeInterval = null;
+    // Miniplayer
+    const miniDot=mini.querySelector('#lMiniDot');
+    const miniName=mini.querySelector('#lMiniName');
+    const miniPlay=mini.querySelector('#lMiniPlay');
+    const miniCanvas=mini.querySelector('#lMiniCanvas');
+    const miniCtx=miniCanvas.getContext('2d');
 
-    // song mode state — target values that we lerp toward
-    let songTargets = {};
-    let songPhase = 0;
+    // Live pattern
+    let livePat = JSON.parse(JSON.stringify(DRUM_PATTERNS[state.drumPattern] || DRUM_PATTERNS.standard));
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // TORN API INTEGRATION (v4)
-    // ═══════════════════════════════════════════════════════════════════════════
-    let tornData = {
-      energy: { current: 100, maximum: 100 },
-      nerve: { current: 20, maximum: 25 },
-      happy: { current: 3000, maximum: 3000 },
-      life: { current: 1000, maximum: 1000 },
-      cooldowns: { drug: 0, medical: 0, booster: 0 },
-      status: { state: 'Okay', description: 'Okay' },
-      travel: { time_left: 0, destination: 'Torn' },
-      money: { wallet: 0, bank: 0, total: 0 },
-    };
-    let tornPollTimer = null;
-    let tornLastPoll = 0;
-
-    async function fetchTornData() {
-      if (!state.tornApiKey || !state.tornMode) return;
-      const now = Date.now();
-      if (now - tornLastPoll < (state.tornPollInterval || 60) * 1000) return;
-      tornLastPoll = now;
-
-      const key = state.tornApiKey;
-      const selections = ['bars', 'cooldowns', 'travel', 'profile', 'networth'];
-      const url = `https://api.torn.com/user/?selections=${selections.join(',')}&key=${key}&comment=LioSynth`;
-
-      try {
-        const resp = await fetch(url);
-        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-        const data = await resp.json();
-        if (data.error) {
-          if (data.error.code === 2) setStatus('torn: invalid api key');
-          else if (data.error.code === 5) setStatus('torn: rate limited');
-          else setStatus('torn: ' + (data.error.error || 'error'));
-          return;
-        }
-
-        if (data.bars) {
-          tornData.energy = data.bars.energy || tornData.energy;
-          tornData.nerve = data.bars.nerve || tornData.nerve;
-          tornData.happy = data.bars.happy || tornData.happy;
-          tornData.life = data.bars.life || tornData.life;
-        }
-        if (data.cooldowns) tornData.cooldowns = data.cooldowns;
-        if (data.travel) tornData.travel = data.travel;
-        if (data.profile) tornData.status = data.profile.status || tornData.status;
-        if (data.networth) tornData.money = {
-          wallet: data.networth.wallet || 0,
-          bank: data.networth.bank || 0,
-          total: data.networth.total || 0,
-        };
-
-        updateTornStatusUI();
-        applyTornToMusic();
-      } catch (err) {
-        setStatus('torn: fetch failed');
-      }
-    }
-
-    function updateTornStatusUI() {
-      const el = panel.querySelector('#lioTornStatus');
-      if (!el) return;
-      const d = tornData;
-      const energyPct = Math.round((d.energy.current / d.energy.maximum) * 100);
-      const nervePct = Math.round((d.nerve.current / d.nerve.maximum) * 100);
-      const happyPct = Math.round((d.happy.current / d.happy.maximum) * 100);
-      const lifePct = Math.round((d.life.current / d.life.maximum) * 100);
-      const statusColor = d.status.state === 'Okay' ? 'var(--lio-accent)' :
-                          d.status.state === 'Hospital' ? '#ff8080' :
-                          d.status.state === 'Jail' ? '#ffa040' :
-                          d.status.state === 'Traveling' ? '#80c0ff' : 'var(--lio-text)';
-
-      el.innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:3px">' +
-        '<div>Status: <b style="color:' + statusColor + '">' + d.status.state + '</b></div>' +
-        '<div>Travel: ' + (d.travel.time_left > 0 ? 'flying (' + d.travel.destination + ')' : 'grounded') + '</div>' +
-        '<div>Energy: <span style="color:var(--lio-accent)">' + energyPct + '%</span></div>' +
-        '<div>Nerve: <span style="color:var(--lio-accent)">' + nervePct + '%</span></div>' +
-        '<div>Happy: <span style="color:var(--lio-accent)">' + happyPct + '%</span></div>' +
-        '<div>Life: <span style="color:var(--lio-accent)">' + lifePct + '%</span></div>' +
-        '<div>Drug CD: ' + (d.cooldowns.drug > 0 ? Math.ceil(d.cooldowns.drug / 60) + 'm' : 'none') + '</div>' +
-        '<div>Med CD: ' + (d.cooldowns.medical > 0 ? Math.ceil(d.cooldowns.medical / 60) + 'm' : 'none') + '</div>' +
-        '<div>Booster CD: ' + (d.cooldowns.booster > 0 ? Math.ceil(d.cooldowns.booster / 60) + 'm' : 'none') + '</div>' +
-        '<div>Cash: $' + (d.money.wallet / 1e6).toFixed(1) + 'M</div>' +
-        '</div>';
-    }
-
-    function applyTornToMusic() {
-      if (!state.tornMode || !isPlaying) return;
-      const intensity = state.tornMapIntensity || 0.7;
-      const d = tornData;
-
-      if (state.tornMapEnergy) {
-        const e = d.energy.current / d.energy.maximum;
-        state.energy = clamp(state.energy * 0.7 + e * 0.3 * intensity + state.energy * (1 - intensity) * 0.7, 0, 1);
-      }
-      if (state.tornMapNerve) {
-        const n = d.nerve.current / d.nerve.maximum;
-        state.melodyDensity = clamp(state.melodyDensity * 0.7 + n * 0.3 * intensity, 0, 1);
-      }
-      if (state.tornMapHappy) {
-        const h = d.happy.current / d.happy.maximum;
-        state.filterCutoff = clamp(state.filterCutoff * 0.7 + h * 0.3 * intensity, 0, 1);
-      }
-      if (state.tornMapLife) {
-        const l = d.life.current / d.life.maximum;
-        state.bassIntensity = clamp(state.bassIntensity * 0.7 + (1.3 - l) * 0.3 * intensity, 0, 1);
-        if (l < 0.3) state.filterCutoff = clamp(state.filterCutoff * 0.9, 0.05, 1);
-      }
-      if (state.tornMapCooldowns) {
-        if (d.cooldowns.drug > 0) {
-          state.reverbWet = clamp(state.reverbWet * 0.8 + 0.5 * 0.2 * intensity, 0, 0.8);
-          state.bpm = Math.max(50, state.bpm - 0.1);
-        }
-        if (d.cooldowns.medical > 0) {
-          state.eqHigh = clamp(state.eqHigh * 0.8 + 0.2 * 0.2, 0, 1);
-          state.eqAir = clamp(state.eqAir * 0.8 + 0.2 * 0.2, 0, 1);
-        }
-        if (d.cooldowns.booster > 0) {
-          state.bpm = Math.min(200, state.bpm + 0.15);
-          state.swing = clamp(state.swing * 0.8 + 0.15 * 0.2 * intensity, 0, 0.4);
-        }
-      }
-      if (tornMapStatus(d, intensity)) return;
-      if (state.tornMapTravel && d.travel.time_left > 0) {
-        state.reverbWet = clamp(state.reverbWet * 0.8 + 0.45 * 0.2 * intensity, 0, 0.7);
-        state.fx = true;
-      }
-      if (state.tornMapMoney) {
-        const cashM = d.money.wallet / 1e6;
-        if (cashM > 5) {
-          state.bpm = Math.min(180, state.bpm + 0.05);
-          state.filterCutoff = clamp(state.filterCutoff * 0.9 + 0.6 * 0.1 * intensity, 0, 1);
-        } else if (cashM < 0.1) {
-          state.bpm = Math.max(60, state.bpm - 0.05);
-        }
-      }
-
-      updateAudio();
-      updateEq();
-      syncTornSlidersToUI();
-    }
-
-    function tornMapStatus(d, intensity) {
-      const s = d.status.state;
-      if (s === 'Jail') {
-        state.drums = true;
-        state.bpm = Math.max(60, state.bpm * 0.95);
-        state.melodyDensity = clamp(state.melodyDensity * 0.8, 0, 0.4);
-        state.reverbWet = clamp(state.reverbWet * 0.8 + 0.3 * 0.2, 0, 0.6);
-        if (state.drumPattern !== 'sparse') {
-          state.drumPattern = 'sparse';
-          livePattern = JSON.parse(JSON.stringify(drumPatterns.sparse));
-          buildSeqRows();
-        }
-        return true;
-      }
-      if (s === 'Hospital') {
-        state.drums = false;
-        state.reverbWet = clamp(state.reverbWet * 0.7 + 0.6 * 0.3 * intensity, 0, 0.8);
-        state.bpm = Math.max(50, state.bpm * 0.97);
-        return true;
-      }
-      return false;
-    }
-
-    function syncTornSlidersToUI() {
-      const e1 = panel.querySelector('#lioEnergy');
-      if (e1) { e1.value = state.energy; panel.querySelector('#lioEnergyVal').textContent = Math.round(state.energy * 100) + '%'; }
-      const e2 = panel.querySelector('#lioFilter');
-      if (e2) { e2.value = state.filterCutoff; panel.querySelector('#lioFilterVal').textContent = Math.round(state.filterCutoff * 100) + '%'; }
-      const e3 = panel.querySelector('#lioRevWet');
-      if (e3) { e3.value = state.reverbWet; panel.querySelector('#lioRevVal').textContent = Math.round(state.reverbWet * 100) + '%'; }
-      const e4 = panel.querySelector('#lioBassInt');
-      if (e4) { e4.value = state.bassIntensity; panel.querySelector('#lioBassIntVal').textContent = Math.round(state.bassIntensity * 100) + '%'; }
-      const e5 = panel.querySelector('#lioMelDens');
-      if (e5) { e5.value = state.melodyDensity; panel.querySelector('#lioMelDensVal').textContent = Math.round(state.melodyDensity * 100) + '%'; }
-      const e6 = panel.querySelector('#lioBpm');
-      if (e6) { e6.value = state.bpm; panel.querySelector('#lioBpmVal').textContent = Math.round(state.bpm); }
-      const e7 = panel.querySelector('#lioSwing');
-      if (e7) { e7.value = state.swing; panel.querySelector('#lioSwingVal').textContent = Math.round(state.swing * 100) + '%'; }
-    }
-
-    function startTornPolling() {
-      stopTornPolling();
-      if (!state.tornMode || !state.tornApiKey) return;
-      fetchTornData();
-      tornPollTimer = setInterval(fetchTornData, (state.tornPollInterval || 60) * 1000);
-    }
-
-    function stopTornPolling() {
-      if (tornPollTimer) { clearInterval(tornPollTimer); tornPollTimer = null; }
-    }
+    // ── AUDIO ────────────────────────────────────────────────────────────────
+    let audioCtx=null, masterG=null, analyser=null, analyserData=null;
+    let convolver=null, revWetG=null, revDryG=null, eqFilters=[];
+    let noiseBuf=null;
+    let playing=false, schedTimer=null, step=0, nextT=0;
+    let rng=mulberry32(hashStr(state.seed+state.preset));
+    let arpPh=0;
 
     function setStatus(txt) {
-      statusEl.textContent = txt;
-      topStatus.textContent = txt.slice(0, 20);
-      miniStatus.textContent = txt.slice(0, 28);
+      statusEl.textContent=txt;
+      topSt.textContent=txt.slice(0,24);
     }
 
-    function secondsPerStep() {
-      return (60 / clamp(Number(state.bpm) || 120, 40, 240)) / 4;
+    function spStep() {
+      return (60/clamp(state.bpm||120,40,240))/4;
     }
 
-    function makeNoiseBuffer() {
-      const len = Math.floor(audioCtx.sampleRate * 2);
-      const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
-      const d = buf.getChannelData(0);
-      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
-      return buf;
+    function makeNoise() {
+      const len=Math.floor(audioCtx.sampleRate*2);
+      const b=audioCtx.createBuffer(1,len,audioCtx.sampleRate);
+      const d=b.getChannelData(0);
+      for(let i=0;i<len;i++) d[i]=Math.random()*2-1;
+      return b;
     }
 
-    function makeImpulse(dur, decay) {
-      const len = Math.floor(audioCtx.sampleRate * dur);
-      const buf = audioCtx.createBuffer(2, len, audioCtx.sampleRate);
-      for (let c = 0; c < 2; c++) {
-        const d = buf.getChannelData(c);
-        for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay);
+    function makeImpulse(dur,decay) {
+      const len=Math.floor(audioCtx.sampleRate*dur);
+      const b=audioCtx.createBuffer(2,len,audioCtx.sampleRate);
+      for(let c=0;c<2;c++){
+        const d=b.getChannelData(c);
+        for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/len,decay);
       }
-      return buf;
+      return b;
     }
 
     function ensureAudio() {
-      if (audioCtx) return;
-      const AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) { setStatus('no web audio :/'); return; }
-
-      audioCtx = new AC();
-      master = audioCtx.createGain();
-      master.gain.value = 0.0001;
-
-      // analyser for the visualizer
-      analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 512;
-      analyser.smoothingTimeConstant = 0.8;
-      analyserData = new Uint8Array(analyser.frequencyBinCount);
-
-      // 5-band EQ
-      const eqFreqs = [80, 250, 1000, 4000, 12000];
-      const eqTypes = ['lowshelf', 'peaking', 'peaking', 'peaking', 'highshelf'];
-      eqFilters = eqFreqs.map((freq, i) => {
-        const f = audioCtx.createBiquadFilter();
-        f.type = eqTypes[i]; f.frequency.value = freq; f.gain.value = 0; f.Q.value = 1.2;
-        return f;
+      if(audioCtx) return;
+      const AC=window.AudioContext||window.webkitAudioContext;
+      if(!AC){setStatus('No Web Audio');return;}
+      audioCtx=new AC();
+      masterG=audioCtx.createGain(); masterG.gain.value=0.0001;
+      analyser=audioCtx.createAnalyser();
+      analyser.fftSize=512; analyser.smoothingTimeConstant=0.82;
+      analyserData=new Uint8Array(analyser.frequencyBinCount);
+      const eqFreqs=[80,250,1000,4000,12000];
+      const eqTypes=['lowshelf','peaking','peaking','peaking','highshelf'];
+      eqFilters=eqFreqs.map((f,i)=>{
+        const n=audioCtx.createBiquadFilter();
+        n.type=eqTypes[i]; n.frequency.value=f; n.gain.value=0; n.Q.value=1.2;
+        return n;
       });
-      for (let i = 0; i < eqFilters.length - 1; i++) eqFilters[i].connect(eqFilters[i + 1]);
-
-      const comp = audioCtx.createDynamicsCompressor();
-      comp.threshold.value = -16; comp.knee.value = 14; comp.ratio.value = 4;
-      comp.attack.value = 0.003; comp.release.value = 0.15;
-
-      // echo
-      const delay = audioCtx.createDelay(1.0);
-      delay.delayTime.value = 0.21;
-      const feedGain = audioCtx.createGain(); feedGain.gain.value = 0.18;
-      const wetGain = audioCtx.createGain(); wetGain.gain.value = state.fx ? 0.14 : 0;
-
-      // convolver reverb
-      convolver = audioCtx.createConvolver();
-      convolver.buffer = makeImpulse(2.4, 2.5);
-      reverbWet = audioCtx.createGain(); reverbWet.gain.value = state.reverb ? state.reverbWet : 0;
-      reverbDry = audioCtx.createGain(); reverbDry.gain.value = 1;
-
-      // routing
-      master.connect(eqFilters[0]);
-      const eqOut = eqFilters[eqFilters.length - 1];
-      eqOut.connect(reverbDry);
-      eqOut.connect(convolver);
-      convolver.connect(reverbWet);
-      reverbDry.connect(comp);
-      reverbWet.connect(comp);
-      master.connect(delay);
-      delay.connect(feedGain); feedGain.connect(delay);
-      delay.connect(wetGain); wetGain.connect(comp);
-      comp.connect(analyser);
-      analyser.connect(audioCtx.destination);
-
-      noiseBuffer = makeNoiseBuffer();
+      for(let i=0;i<eqFilters.length-1;i++) eqFilters[i].connect(eqFilters[i+1]);
+      const comp=audioCtx.createDynamicsCompressor();
+      comp.threshold.value=-16; comp.knee.value=14; comp.ratio.value=4;
+      comp.attack.value=0.003; comp.release.value=0.15;
+      const del=audioCtx.createDelay(1.0); del.delayTime.value=0.21;
+      const feedG=audioCtx.createGain(); feedG.gain.value=0.18;
+      const wetG=audioCtx.createGain(); wetG.gain.value=state.fx?0.14:0;
+      convolver=audioCtx.createConvolver(); convolver.buffer=makeImpulse(2.4,2.5);
+      revWetG=audioCtx.createGain(); revWetG.gain.value=state.reverb?state.reverbWet:0;
+      revDryG=audioCtx.createGain(); revDryG.gain.value=1;
+      masterG.connect(eqFilters[0]);
+      const eqOut=eqFilters[eqFilters.length-1];
+      eqOut.connect(revDryG); eqOut.connect(convolver);
+      convolver.connect(revWetG);
+      revDryG.connect(comp); revWetG.connect(comp);
+      masterG.connect(del); del.connect(feedG); feedG.connect(del);
+      del.connect(wetG); wetG.connect(comp);
+      comp.connect(analyser); analyser.connect(audioCtx.destination);
+      noiseBuf=makeNoise();
       updateEq();
     }
 
     function updateEq() {
-      if (!eqFilters.length || !audioCtx) return;
-      const vals = [(state.eqBass || 0.5) * 2 - 1, (state.eqLow || 0.5) * 2 - 1, (state.eqMid || 0.5) * 2 - 1, (state.eqHigh || 0.5) * 2 - 1, (state.eqAir || 0.5) * 2 - 1];
-      const now = audioCtx.currentTime;
-      eqFilters.forEach((f, i) => f.gain.setTargetAtTime(vals[i] * 12, now, 0.05));
+      if(!eqFilters.length) return;
+      const keys=['eqBass','eqLow','eqMid','eqHigh','eqAir'];
+      const now=audioCtx?audioCtx.currentTime:0;
+      eqFilters.forEach((f,i)=>{
+        if(audioCtx) f.gain.setTargetAtTime(((state[keys[i]]||0.5)*2-1)*12,now,0.05);
+      });
     }
 
     function updateAudio() {
-      if (!audioCtx || !master) return;
-      const now = audioCtx.currentTime;
-      const vol = isPlaying ? clamp(state.volume, 0, 1) : 0.0001;
-      master.gain.cancelScheduledValues(now);
-      master.gain.setTargetAtTime(vol, now, 0.03);
-      if (reverbWet) reverbWet.gain.setTargetAtTime(state.reverb ? (state.reverbWet || 0.18) : 0, now, 0.05);
+      if(!audioCtx||!masterG) return;
+      const now=audioCtx.currentTime;
+      masterG.gain.cancelScheduledValues(now);
+      masterG.gain.setTargetAtTime(playing?clamp(state.volume,0,1):0.0001,now,0.03);
+      if(revWetG) revWetG.gain.setTargetAtTime(state.reverb?(state.reverbWet||0.18):0,now,0.05);
     }
 
-    // ── synth voices ──
-    function playTone(o) {
-      if (!audioCtx || !master) return;
-      const t = o.time, dur = Math.max(0.02, o.dur || 0.12);
-      const vol = clamp(o.vol || 0.1, 0.001, 0.85);
-      const att = Math.max(0.002, o.attack || 0.01);
-      const rel = Math.max(0.02, o.release || 0.08);
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.type = o.type || 'sine';
-      osc.frequency.setValueAtTime(o.freq, t);
-      if (o.freqEnd) osc.frequency.exponentialRampToValueAtTime(Math.max(20, o.freqEnd), t + dur * 0.55);
-      if (o.detune) osc.detune.value = o.detune;
-      gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(vol, t + att);
-      gain.gain.setValueAtTime(vol, t + dur);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + dur + rel);
-      if (o.filter !== undefined) {
-        const filt = audioCtx.createBiquadFilter();
-        filt.type = o.filterType || 'lowpass';
-        filt.frequency.setValueAtTime(o.filter, t);
-        if (o.filterEnd) filt.frequency.exponentialRampToValueAtTime(Math.max(20, o.filterEnd), t + dur);
-        filt.Q.value = o.q || 0.8;
-        osc.connect(filt); filt.connect(gain);
-      } else {
-        osc.connect(gain);
-      }
-      gain.connect(master);
-      osc.start(t); osc.stop(t + dur + rel + 0.05);
+    function tone(o) {
+      if(!audioCtx||!masterG) return;
+      const t=o.time, dur=Math.max(0.02,o.dur||0.12);
+      const vol=clamp(o.vol||0.1,0.001,0.85);
+      const att=Math.max(0.002,o.attack||0.01), rel=Math.max(0.02,o.release||0.08);
+      const osc=audioCtx.createOscillator();
+      const g=audioCtx.createGain();
+      osc.type=o.type||'sine'; osc.frequency.setValueAtTime(o.freq,t);
+      if(o.freqEnd) osc.frequency.exponentialRampToValueAtTime(Math.max(20,o.freqEnd),t+dur*0.55);
+      if(o.detune) osc.detune.value=o.detune;
+      g.gain.setValueAtTime(0.0001,t);
+      g.gain.exponentialRampToValueAtTime(vol,t+att);
+      g.gain.setValueAtTime(vol,t+dur);
+      g.gain.exponentialRampToValueAtTime(0.0001,t+dur+rel);
+      if(o.filter){
+        const fl=audioCtx.createBiquadFilter();
+        fl.type=o.filterType||'lowpass'; fl.frequency.setValueAtTime(o.filter,t);
+        if(o.filterEnd) fl.frequency.exponentialRampToValueAtTime(Math.max(20,o.filterEnd),t+dur);
+        fl.Q.value=o.q||0.8; osc.connect(fl); fl.connect(g);
+      } else { osc.connect(g); }
+      g.connect(masterG); osc.start(t); osc.stop(t+dur+rel+0.05);
     }
 
-    function playNoise(o) {
-      if (!audioCtx || !master || !noiseBuffer) return;
-      const t = o.time, dur = Math.max(0.01, o.dur || 0.08);
-      const vol = clamp(o.vol || 0.1, 0.001, 0.85);
-      const src = audioCtx.createBufferSource();
-      const gain = audioCtx.createGain();
-      const filt = audioCtx.createBiquadFilter();
-      src.buffer = noiseBuffer; src.loop = true;
-      filt.type = o.filterType || 'highpass';
-      filt.frequency.setValueAtTime(o.filter || 7000, t);
-      filt.Q.value = o.q || 0.7;
-      gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(vol, t + 0.006);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-      src.connect(filt); filt.connect(gain); gain.connect(master);
-      src.start(t); src.stop(t + dur + 0.02);
+    function noise(o) {
+      if(!audioCtx||!masterG||!noiseBuf) return;
+      const t=o.time, dur=Math.max(0.01,o.dur||0.08);
+      const vol=clamp(o.vol||0.1,0.001,0.85);
+      const src=audioCtx.createBufferSource();
+      const g=audioCtx.createGain(); const fl=audioCtx.createBiquadFilter();
+      src.buffer=noiseBuf; src.loop=true;
+      fl.type=o.filterType||'highpass'; fl.frequency.setValueAtTime(o.filter||7000,t);
+      fl.Q.value=o.q||0.7;
+      g.gain.setValueAtTime(0.0001,t);
+      g.gain.exponentialRampToValueAtTime(vol,t+0.006);
+      g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+      src.connect(fl); fl.connect(g); g.connect(masterG);
+      src.start(t); src.stop(t+dur+0.02);
     }
 
-    function playKick(time, power) {
-      playTone({ time, freq: 150, freqEnd: 40, dur: 0.2, type: 'sine', vol: 0.38 * power, attack: 0.003, release: 0.07 });
-      playNoise({ time, dur: 0.022, vol: 0.06 * power, filterType: 'lowpass', filter: 850 });
+    function kick(t,pw) {
+      tone({time:t,freq:150,freqEnd:40,dur:0.2,type:'sine',vol:0.38*pw,attack:0.003,release:0.07});
+      noise({time:t,dur:0.022,vol:0.06*pw,filterType:'lowpass',filter:850});
     }
-
-    function playSnare(time, power) {
-      playNoise({ time, dur: 0.12, vol: 0.2 * power, filterType: 'bandpass', filter: 1900, q: 0.85 });
-      playTone({ time, freq: 190, dur: 0.07, type: 'triangle', vol: 0.07 * power, attack: 0.003, release: 0.04 });
+    function snare(t,pw) {
+      noise({time:t,dur:0.12,vol:0.2*pw,filterType:'bandpass',filter:1900,q:0.85});
+      tone({time:t,freq:190,dur:0.07,type:'triangle',vol:0.07*pw,attack:0.003,release:0.04});
     }
-
-    function playHat(time, power, open) {
-      playNoise({ time, dur: open ? 0.18 : 0.04, vol: (open ? 0.09 : 0.06) * power, filterType: 'highpass', filter: open ? 6000 : 9000, q: 0.5 });
+    function hat(t,pw,open) {
+      noise({time:t,dur:open?0.18:0.04,vol:(open?0.09:0.06)*pw,filterType:'highpass',filter:open?6000:9000,q:0.5});
     }
-
-    function playClap(time, power) {
-      for (let i = 0; i < 3; i++) playNoise({ time: time + i * 0.01, dur: 0.06, vol: 0.12 * power, filterType: 'bandpass', filter: 1200, q: 1.2 });
+    function clap(t,pw) {
+      for(let i=0;i<3;i++) noise({time:t+i*0.01,dur:0.06,vol:0.12*pw,filterType:'bandpass',filter:1200,q:1.2});
     }
-
-    function playChord(time, midiRoot, scaleArr, voicing, waveType, vol, dur, filterFreq) {
-      const degrees = chordVoicings[voicing] || chordVoicings.triad;
-      degrees.forEach((deg, idx) => {
-        const note = midiRoot + (scaleArr[deg % scaleArr.length] || 0);
-        playTone({ time: time + idx * 0.012, freq: midiToFreq(note), dur, type: waveType, vol: vol * (0.6 - idx * 0.05), attack: 0.025, release: 0.1, filter: filterFreq, q: 0.7, detune: (Math.random() - 0.5) * 6 });
+    function chord(t,root,sc,voicing,wave,vol,dur,flt) {
+      const degs=CHORD_VOICINGS[voicing]||CHORD_VOICINGS.triad;
+      degs.forEach((d,i)=>{
+        tone({time:t+i*0.012,freq:midiToFreq(root+(sc[d%sc.length]||0)),dur,
+              type:wave,vol:vol*(0.6-i*0.05),attack:0.025,release:0.1,
+              filter:flt,q:0.7,detune:(Math.random()-0.5)*6});
       });
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // SCHEDULER — the heart. called by timer, schedules notes ahead of time.
-    // ═══════════════════════════════════════════════════════════════════════════
-    function scheduleStep(step, rawTime) {
-      const allGenres = getAllGenres();
-      const genre = allGenres[state.preset] || builtinGenres.neonwar;
-      const scale = scales[genre.scale] || scales.minor;
-      const step16 = step % 16;
-      const bar = Math.floor(step / 16);
-      const stepDur = secondsPerStep();
-      const swing = genre.swing !== undefined ? genre.swing : state.swing || 0.06;
-      const swingOffset = step16 % 2 === 1 ? stepDur * swing : 0;
-      const time = rawTime + swingOffset;
+    // ── STEP SCHEDULER ───────────────────────────────────────────────────────
+    function schedStep(stepN,rawT) {
+      const ap=allPresets(); const p=ap[state.preset]||PRESETS.neonwar;
+      const sc=SCALES[p.scale]||SCALES.minor;
+      const s16=stepN%16, bar=Math.floor(stepN/16);
+      const sd=spStep();
+      const sw=p.swing!==undefined?p.swing:0.06;
+      const t=rawT+(s16%2===1?sd*sw:0);
+      const chords=p.chords||[0,5,3,6];
+      const ci=chords[bar%chords.length]||0;
+      const co=sc[ci%sc.length]||0;
+      const baseMidi=(p.root||45)+co;
+      const en=clamp(state.energy||0,0,1);
+      const bi=clamp(state.bassIntensity!==undefined?state.bassIntensity:p.bassInt||0.7,0,1);
+      const md=clamp(state.melodyDensity!==undefined?state.melodyDensity:p.melDens||0.5,0,1);
+      const ff=200+clamp(state.filterCutoff!==undefined?state.filterCutoff:p.filter||0.5,0,1)*7000;
+      const pw=0.6+en*0.6;
 
-      const chordIndex = (genre.chords || [0, 5, 3, 6])[bar % (genre.chords || [0, 5, 3, 6]).length] || 0;
-      const chordOffset = scale[chordIndex % scale.length] || 0;
-      const baseMidi = (genre.root || 45) + chordOffset;
-
-      const energy = clamp(Number(state.energy) || 0, 0, 1);
-      const bassInt = clamp(Number(state.bassIntensity !== undefined ? state.bassIntensity : genre.bassIntensity || 0.7), 0, 1);
-      const melDens = clamp(Number(state.melodyDensity !== undefined ? state.melodyDensity : genre.melodyDensity || 0.5), 0, 1);
-      const filterFreq = 200 + clamp(Number(state.filterCutoff !== undefined ? state.filterCutoff : genre.filterCutoff || 0.5), 0, 1) * 7000;
-      const power = 0.6 + energy * 0.6;
-
-      // drums
-      if (state.drums) {
-        if (livePattern.kick[step16]) playKick(time, power);
-        if (livePattern.snare[step16]) playSnare(time, power);
-        if (livePattern.hat[step16]) playHat(time, power, false);
-        if (livePattern.ohat[step16]) playHat(time, power, true);
-        if (energy > 0.75 && step16 % 4 === 2 && rng() < 0.3) playSnare(time + stepDur * 0.5, power * 0.3);
-        if (energy > 0.6 && livePattern.snare[step16] && rng() < 0.4) playClap(time, power * 0.4);
+      if(state.drums){
+        if(livePat.kick[s16])  kick(t,pw);
+        if(livePat.snare[s16]) snare(t,pw);
+        if(livePat.hat[s16])   hat(t,pw,false);
+        if(livePat.ohat[s16])  hat(t,pw,true);
+        if(en>0.75&&s16%4===2&&rng()<0.3) snare(t+sd*0.5,pw*0.3);
+        if(en>0.6&&livePat.snare[s16]&&rng()<0.4) clap(t,pw*0.4);
       }
-
-      // bass
-      if (state.bass) {
-        const bassRate = bassInt > 0.7 ? [0, 3, 6, 8, 10, 14] : bassInt > 0.4 ? [0, 6, 8, 14] : [0, 8];
-        if (bassRate.includes(step16)) {
-          const bassChoices = [0, 0, 2, 4];
-          const bassNote = baseMidi - 12 + (scale[bassChoices[Math.floor(rng() * bassChoices.length)] % scale.length] || 0);
-          playTone({ time, freq: midiToFreq(bassNote), dur: stepDur * (rng() < 0.28 ? 1.8 : 0.9), type: genre.bassWave || 'square', vol: 0.14 + bassInt * 0.12 + energy * 0.06, attack: 0.008, release: 0.09, filter: filterFreq * 0.6, filterEnd: filterFreq * 0.3, q: 0.7 });
+      if(state.bass){
+        const br=bi>0.7?[0,3,6,8,10,14]:bi>0.4?[0,6,8,14]:[0,8];
+        if(br.includes(s16)){
+          const bsc=[0,0,2,4];
+          const bn=baseMidi-12+(sc[bsc[Math.floor(rng()*bsc.length)]%sc.length]||0);
+          tone({time:t,freq:midiToFreq(bn),dur:sd*(rng()<0.28?1.8:0.9),
+                type:p.bassWave||'square',vol:0.14+bi*0.12+en*0.06,
+                attack:0.008,release:0.09,filter:ff*0.6,filterEnd:ff*0.3,q:0.7});
         }
       }
-
-      // chord stab
-      if (state.melody && state.chordMode && step16 % 4 === 0 && rng() < 0.55 + energy * 0.25) {
-        playChord(time, baseMidi + 12, scale, state.chordVoicing || 'triad', genre.wave || 'sawtooth', (0.04 + melDens * 0.05) * (0.5 + energy * 0.5), stepDur * (1.8 + rng() * 1.2), filterFreq);
+      if(state.melody&&state.chordMode&&s16%4===0&&rng()<0.55+en*0.25){
+        chord(t,baseMidi+12,sc,state.chordVoicing||'triad',p.wave||'sawtooth',
+              (0.04+md*0.05)*(0.5+en*0.5),sd*(1.8+rng()*1.2),ff);
       }
-
-      // arpeggiator
-      if (state.melody && state.arpMode) {
-        const arpSteps = chordVoicings[state.chordVoicing || 'triad'];
-        const arpRate = Number(state.arpRate) || 2;
-        if (step16 % arpRate === 0) {
-          const deg = arpSteps[arpPhase % arpSteps.length];
-          const arpMidi = baseMidi + 12 + (scale[deg % scale.length] || 0) + (rng() < 0.15 ? 12 : 0);
-          playTone({ time, freq: midiToFreq(arpMidi), dur: stepDur * (0.4 + rng() * 0.4), type: genre.wave || 'sawtooth', vol: 0.05 + melDens * 0.06 + energy * 0.04, attack: 0.008, release: 0.07, filter: filterFreq * 1.2, q: 1.1 });
-          arpPhase++;
+      if(state.melody&&state.arpMode){
+        const ar=Number(state.arpRate)||2;
+        if(s16%ar===0){
+          const ad=CHORD_VOICINGS[state.chordVoicing||'triad'];
+          const am=baseMidi+12+(sc[ad[arpPh%ad.length]%sc.length]||0)+(rng()<0.15?12:0);
+          tone({time:t,freq:midiToFreq(am),dur:sd*(0.4+rng()*0.4),
+                type:p.wave||'sawtooth',vol:0.05+md*0.06+en*0.04,
+                attack:0.008,release:0.07,filter:ff*1.2,q:1.1});
+          arpPh++;
         }
       }
-
-      // free melody (only if arp is off)
-      if (state.melody && !state.arpMode) {
-        const chance = 0.08 + melDens * 0.55 + energy * 0.2;
-        const allowed = energy > 0.7 || step16 % 2 === 0 || [3, 7, 11, 15].includes(step16);
-        if (allowed && rng() < chance) {
-          const degPool = [0, 0, 1, 2, 3, 4, 5, 6];
-          const deg = (chordIndex + degPool[Math.floor(rng() * degPool.length)]) % scale.length;
-          playTone({ time, freq: midiToFreq((genre.root || 45) + 24 + (scale[deg] || 0) + (rng() < 0.22 ? 12 : 0)), dur: stepDur * (0.4 + rng() * 1.2), type: genre.wave || 'sine', vol: 0.045 + melDens * 0.07 + energy * 0.05, attack: 0.014, release: 0.1, filter: filterFreq * 1.5, filterEnd: filterFreq * 0.8, q: 0.9 });
+      if(state.melody&&!state.arpMode){
+        const ch=0.08+md*0.55+en*0.2;
+        const al=en>0.7||s16%2===0||[3,7,11,15].includes(s16);
+        if(al&&rng()<ch){
+          const dp=[0,0,1,2,3,4,5,6];
+          const dg=(ci+dp[Math.floor(rng()*dp.length)])%sc.length;
+          const mm=(p.root||45)+24+(sc[dg]||0)+(rng()<0.22?12:0);
+          tone({time:t,freq:midiToFreq(mm),dur:sd*(0.4+rng()*1.2),
+                type:p.wave||'sine',vol:0.045+md*0.07+en*0.05,
+                attack:0.014,release:0.1,filter:ff*1.5,filterEnd:ff*0.8,q:0.9});
         }
       }
-
-      // ambient pad at bar start
-      if (state.melody && state.reverb && step16 === 0 && rng() < 0.3 + melDens * 0.4) {
-        playTone({ time, freq: midiToFreq(baseMidi + 12 + (scale[chordIndex % scale.length] || 0)), dur: stepDur * 14, type: 'sine', vol: 0.018 + melDens * 0.02, attack: 0.3, release: 0.8, filter: 1800, q: 0.5 });
+      if(state.melody&&state.reverb&&s16===0&&rng()<0.3+md*0.4){
+        tone({time:t,freq:midiToFreq(baseMidi+12+(sc[ci%sc.length]||0)),
+              dur:sd*14,type:'sine',vol:0.018+md*0.02,attack:0.3,release:0.8,filter:1800,q:0.5});
       }
+      if(s16===0) setStatus(`${(ap[state.preset]||{}).name||'?'} · Bar ${bar+1}`);
+    }
 
-      if (step16 === 0) {
-        const g = getAllGenres()[state.preset];
-        setStatus(`${(g || {}).name || '?'} · bar ${bar + 1} · ${state.seed}`);
+    function scheduler(){
+      if(!playing||!audioCtx) return;
+      while(nextT<audioCtx.currentTime+0.15){
+        schedStep(step,nextT); nextT+=spStep(); step++;
       }
     }
 
-    function scheduler() {
-      if (!isPlaying || !audioCtx) return;
-      while (nextNoteTime < audioCtx.currentTime + 0.15) {
-        scheduleStep(currentStep, nextNoteTime);
-        nextNoteTime += secondsPerStep();
-        currentStep++;
-      }
+    async function startMusic(){
+      ensureAudio(); if(!audioCtx) return;
+      try{ if(audioCtx.state==='suspended') await audioCtx.resume(); }
+      catch{ setStatus('Tap START again'); return; }
+      rng=mulberry32(hashStr(`${state.seed}|${state.preset}|v3`));
+      arpPh=0; step=0; nextT=audioCtx.currentTime+0.06;
+      playing=true; updateAudio();
+      if(schedTimer) clearInterval(schedTimer);
+      schedTimer=setInterval(scheduler,22);
+      playBtn.textContent='⏹ STOP'; playBtn.classList.add('playing');
+      miniPlay.textContent='⏹'; miniDot.classList.add('on');
+      statusDot.classList.add('on');
+      setStatus(`Playing: ${(allPresets()[state.preset]||{}).name||'?'}`);
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // SONG MODE — slowly drift parameters over time. the mynoise.net vibe.
-    // ═══════════════════════════════════════════════════════════════════════════
-    function pickSongTargets() {
-      songTargets = {
-        energy: 0.2 + rng() * 0.7,
-        filterCutoff: 0.1 + rng() * 0.8,
-        reverbWet: rng() * 0.6,
-        bassIntensity: 0.2 + rng() * 0.7,
-        melodyDensity: 0.1 + rng() * 0.7,
-      };
-    }
-
-    function songModeTick() {
-      if (!state.songMode || !isPlaying) return;
-      const speed = Number(state.songModeSpeed) || 0.5;
-      songPhase += 0.01 * speed;
-
-      // lerp current values toward targets
-      const lerpRate = 0.02 * speed;
-      const params = ['energy', 'filterCutoff', 'reverbWet', 'bassIntensity', 'melodyDensity'];
-      params.forEach(p => {
-        if (songTargets[p] !== undefined) {
-          const diff = songTargets[p] - (state[p] || 0.5);
-          state[p] = (state[p] || 0.5) + diff * lerpRate;
-        }
-      });
-
-      // occasionally pick new targets
-      if (rng() < 0.003 * speed) pickSongTargets();
-
-      // update sliders to reflect drift
-      energyInput.value = state.energy;
-      energyEl().textContent = Math.round(state.energy * 100) + '%';
-      filterInput.value = state.filterCutoff;
-      filterVal().textContent = Math.round(state.filterCutoff * 100) + '%';
-      revWetInput.value = state.reverbWet;
-      revVal().textContent = Math.round(state.reverbWet * 100) + '%';
-      bassIntInput.value = state.bassIntensity;
-      bassIntVal().textContent = Math.round(state.bassIntensity * 100) + '%';
-      melDensInput.value = state.melodyDensity;
-      melDensVal().textContent = Math.round(state.melodyDensity * 100) + '%';
-
+    function stopMusic(){
+      playing=false; if(schedTimer){clearInterval(schedTimer);schedTimer=null;}
       updateAudio();
+      playBtn.textContent='▶ START'; playBtn.classList.remove('playing');
+      miniPlay.textContent='▶'; miniDot.classList.remove('on');
+      statusDot.classList.remove('on');
+      setStatus('Stopped.');
     }
 
-    // helper to get val elements (they're siblings of inputs)
-    function energyEl() { return el('#lioEnergyVal'); }
-    function filterVal() { return el('#lioFilterVal'); }
-    function revVal() { return el('#lioRevVal'); }
-    function bassIntVal() { return el('#lioBassIntVal'); }
-    function melDensVal() { return el('#lioMelDensVal'); }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // PLAY / STOP
-    // ═══════════════════════════════════════════════════════════════════════════
-    async function startMusic() {
-      ensureAudio();
-      if (!audioCtx) return;
-      try { if (audioCtx.state === 'suspended') await audioCtx.resume(); } catch { return; }
-
-      rng = mulberry32(hashString(`${state.seed}|${state.preset}|lio3`));
-      arpPhase = 0; currentStep = 0;
-      nextNoteTime = audioCtx.currentTime + 0.06;
-      isPlaying = true;
-      songPhase = 0;
-      pickSongTargets();
-      updateAudio();
-
-      if (timer) clearInterval(timer);
-      timer = setInterval(scheduler, 22);
-      // song mode ticker (slower)
-      if (window._lioSongInterval) clearInterval(window._lioSongInterval);
-      if (state.songMode) window._lioSongInterval = setInterval(songModeTick, 200);
-
-      playBtn.textContent = '⏹ STOP';
-      playBtn.classList.add('playing');
-      statusDot.classList.add('playing');
-      miniPlayBtn.textContent = '⏹';
-      miniPlayBtn.classList.add('playing');
-      setStatus(`playing: ${getAllGenres()[state.preset]?.name || '?'}`);
-    }
-
-    function stopMusic() {
-      isPlaying = false;
-      if (timer) { clearInterval(timer); timer = null; }
-      if (window._lioSongInterval) { clearInterval(window._lioSongInterval); window._lioSongInterval = null; }
-      updateAudio();
-      playBtn.textContent = '▶ START';
-      playBtn.classList.remove('playing');
-      statusDot.classList.remove('playing');
-      miniPlayBtn.textContent = '▶';
-      miniPlayBtn.classList.remove('playing');
-      setStatus('stopped.');
-    }
-
-    function panicStop() {
-      stopMusic();
-      if (audioCtx && master) {
-        const now = audioCtx.currentTime;
-        master.gain.cancelScheduledValues(now);
-        master.gain.setValueAtTime(0.0001, now);
+    function panicStop(){
+      playing=false; if(schedTimer){clearInterval(schedTimer);schedTimer=null;}
+      if(audioCtx&&masterG){
+        const now=audioCtx.currentTime;
+        masterG.gain.cancelScheduledValues(now); masterG.gain.setValueAtTime(0.0001,now);
       }
-      setStatus('panic! silenced.');
+      playBtn.textContent='▶ START'; playBtn.classList.remove('playing');
+      miniPlay.textContent='▶'; miniDot.classList.remove('on');
+      statusDot.classList.remove('on');
+      setStatus('⛔ Panic stop');
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // SLEEP TIMER — fade out over 30s then stop
-    // ═══════════════════════════════════════════════════════════════════════════
-    function startSleepTimer(minutes) {
-      clearSleepTimer();
-      if (!minutes || minutes <= 0) return;
-      const ms = minutes * 60 * 1000;
-      sleepStatus.textContent = `sleep: ${minutes}min`;
-      sleepTimerId = setTimeout(() => {
-        // fade out over 30s
-        if (!isPlaying) { clearSleepTimer(); return; }
-        const startVol = state.volume;
-        let fadeProgress = 0;
-        sleepFadeInterval = setInterval(() => {
-          fadeProgress += 0.033;
-          const fade = Math.max(0, 1 - fadeProgress / 30);
-          state.volume = startVol * fade;
-          if (audioCtx && master) master.gain.setTargetAtTime(state.volume > 0.0001 ? state.volume : 0.0001, audioCtx.currentTime, 0.1);
-          if (fadeProgress >= 30) {
-            clearInterval(sleepFadeInterval); sleepFadeInterval = null;
-            stopMusic();
-            state.volume = startVol;
-            clearSleepTimer();
-          }
-        }, 1000);
-      }, ms);
-    }
+    // ── VISUALIZER ───────────────────────────────────────────────────────────
+    function drawViz(){
+      requestAnimationFrame(drawViz);
+      const dpr=window.devicePixelRatio||1;
+      canvas.width=(panel.querySelector('.viz-wrap').clientWidth||300)*dpr;
+      canvas.height=60*dpr;
+      const W=canvas.width, H=canvas.height;
+      ctx2d.clearRect(0,0,W,H);
 
-    function clearSleepTimer() {
-      if (sleepTimerId) { clearTimeout(sleepTimerId); sleepTimerId = null; }
-      if (sleepFadeInterval) { clearInterval(sleepFadeInterval); sleepFadeInterval = null; }
-      sleepStatus.textContent = '';
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // VISUALIZER — bars, waveform, or circular. runs on requestAnimationFrame.
-    // ═══════════════════════════════════════════════════════════════════════════
-    let vizRaf = null;
-
-    function resizeCanvas(c, ctx) {
-      const wrap = c.parentElement;
-      if (!wrap) return;
-      c.width = wrap.clientWidth * window.devicePixelRatio;
-      c.height = parseInt(c.getAttribute('height') || '56') * window.devicePixelRatio;
-    }
-
-    function drawViz() {
-      vizRaf = requestAnimationFrame(drawViz);
-
-      // pick the right canvas (mini or main)
-      const isMini = state.miniplayer;
-      const c = isMini ? miniCanvas : canvas;
-      const ctx = isMini ? miniCtx : ctx2d;
-      if (!c || !ctx) return;
-
-      resizeCanvas(c, ctx);
-      const W = c.width, H = c.height;
-      const dpr = window.devicePixelRatio;
-
-      ctx.clearRect(0, 0, W, H);
-
-      if (!state.visualizer || state.vizMode === 'off') {
-        ctx.fillStyle = 'rgba(40,40,60,0.3)';
-        ctx.fillRect(0, 0, W, H);
+      if(!state.visualizer){
+        ctx2d.fillStyle='rgba(20,20,30,0.6)';
+        ctx2d.fillRect(0,0,W,H);
         return;
       }
 
-      if (!analyser || !isPlaying) {
-        // idle animation — gentle sine wave
-        const t = Date.now() / 1000;
-        ctx.beginPath();
-        ctx.strokeStyle = 'rgba(128,128,180,0.2)';
-        ctx.lineWidth = 1.5 * dpr;
-        for (let i = 0; i < W; i += 2 * dpr) {
-          const y = H / 2 + Math.sin(i / W * Math.PI * 3 + t * 1.5) * H * 0.15;
-          i === 0 ? ctx.moveTo(i, y) : ctx.lineTo(i, y);
+      const t=Date.now()/1000;
+      if(!analyser||!playing){
+        // idle sine wave — theme colored
+        ctx2d.beginPath();
+        for(let i=0;i<W;i++){
+          const y=H/2+Math.sin(i/W*Math.PI*4+t*2)*H*0.15+Math.sin(i/W*Math.PI*7+t*1.3)*H*0.06;
+          i===0?ctx2d.moveTo(i,y):ctx2d.lineTo(i,y);
         }
-        ctx.stroke();
+        const grad=ctx2d.createLinearGradient(0,0,W,0);
+        grad.addColorStop(0,'rgba(255,100,200,0.5)');
+        grad.addColorStop(0.5,'rgba(160,80,255,0.5)');
+        grad.addColorStop(1,'rgba(80,160,255,0.5)');
+        ctx2d.strokeStyle=grad;
+        ctx2d.lineWidth=1.5*dpr;
+        ctx2d.stroke();
         return;
       }
 
       analyser.getByteFrequencyData(analyserData);
-      const bins = analyserData.length;
-
-      if (state.vizMode === 'bars') {
-        const barW = W / bins;
-        for (let i = 0; i < bins; i++) {
-          const v = analyserData[i] / 255;
-          const h = v * H;
-          const hue = 120 + v * 180; // green to blue (matrix-ish)
-          ctx.fillStyle = `hsla(${hue}, 70%, ${40 + v * 30}%, ${0.6 + v * 0.4})`;
-          ctx.fillRect(i * barW, H - h, Math.max(1, barW - 1), h);
-          // glow cap
-          if (v > 0.3) {
-            ctx.fillStyle = `hsla(${hue + 40}, 100%, 75%, ${v * 0.6})`;
-            ctx.fillRect(i * barW, H - h - 2 * dpr, Math.max(1, barW - 1), 2 * dpr);
-          }
+      const bins=analyserData.length, bw=W/bins;
+      for(let i=0;i<bins;i++){
+        const v=analyserData[i]/255;
+        const h2=v*H;
+        const hue=270-v*130;
+        ctx2d.fillStyle=`hsla(${hue},${70+v*30}%,${38+v*32}%,${0.65+v*0.35})`;
+        ctx2d.fillRect(i*bw,H-h2,bw-0.5,h2);
+        if(v>0.05){
+          ctx2d.fillStyle=`hsla(${hue+40},100%,80%,${v*0.45})`;
+          ctx2d.fillRect(i*bw,H-h2-2*dpr,bw-0.5,2*dpr);
         }
-      } else if (state.vizMode === 'wave') {
-        analyser.getByteTimeDomainData(analyserData);
-        ctx.beginPath();
-        ctx.strokeStyle = 'rgba(100,255,140,0.7)';
-        ctx.lineWidth = 2 * dpr;
-        for (let i = 0; i < bins; i++) {
-          const x = i / bins * W;
-          const y = ((analyserData[i] / 128) - 1) * H * 0.4 + H / 2;
-          i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-        }
-        ctx.stroke();
-        // second pass dimmer
-        ctx.beginPath();
-        ctx.strokeStyle = 'rgba(100,255,140,0.2)';
-        ctx.lineWidth = 6 * dpr;
-        for (let i = 0; i < bins; i++) {
-          const x = i / bins * W;
-          const y = ((analyserData[i] / 128) - 1) * H * 0.4 + H / 2;
-          i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-        }
-        ctx.stroke();
-      } else if (state.vizMode === 'circle') {
-        const cx = W / 2, cy = H / 2;
-        const radius = Math.min(W, H) * 0.3;
-        ctx.beginPath();
-        ctx.strokeStyle = 'rgba(100,255,140,0.5)';
-        ctx.lineWidth = 2 * dpr;
-        for (let i = 0; i < bins; i++) {
-          const angle = (i / bins) * Math.PI * 2 - Math.PI / 2;
-          const v = analyserData[i] / 255;
-          const r = radius + v * radius * 0.8;
-          const x = cx + Math.cos(angle) * r;
-          const y = cy + Math.sin(angle) * r;
-          i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-        }
-        ctx.closePath();
-        ctx.stroke();
-        // inner glow
-        ctx.beginPath();
-        ctx.fillStyle = 'rgba(100,255,140,0.08)';
-        ctx.arc(cx, cy, radius * 0.6, 0, Math.PI * 2);
-        ctx.fill();
       }
+      analyser.getByteTimeDomainData(analyserData);
+      ctx2d.beginPath();
+      ctx2d.strokeStyle='rgba(255,220,255,0.3)';
+      ctx2d.lineWidth=1.2*dpr;
+      for(let i=0;i<bins;i++){
+        const x=i/bins*W;
+        const y=((analyserData[i]/128)-1)*H*0.35+H/2;
+        i===0?ctx2d.moveTo(x,y):ctx2d.lineTo(x,y);
+      }
+      ctx2d.stroke();
     }
-
     drawViz();
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // SEQUENCER UI
-    // ═══════════════════════════════════════════════════════════════════════════
-    function buildSeqRows() {
-      ['kick', 'snare', 'hat', 'ohat'].forEach(type => {
-        const row = el(`#lioSeq${type.charAt(0).toUpperCase() + type.slice(1)}`);
-        if (!row) return;
-        while (row.children.length > 1) row.removeChild(row.lastChild);
-        for (let i = 0; i < 16; i++) {
-          const cell = document.createElement('div');
-          cell.className = `lio-seq-cell ${type}${livePattern[type][i] ? ' on' : ''}`;
-          cell.dataset.type = type; cell.dataset.idx = i;
-          cell.addEventListener('click', () => {
-            livePattern[type][i] = livePattern[type][i] ? 0 : 1;
-            cell.classList.toggle('on', !!livePattern[type][i]);
-          });
-          row.appendChild(cell);
+    // Mini visualizer
+    function drawMini(){
+      requestAnimationFrame(drawMini);
+      const dpr=window.devicePixelRatio||1;
+      const wrap=mini.querySelector('.mini-canvas-wrap');
+      miniCanvas.width=(wrap.clientWidth||100)*dpr;
+      miniCanvas.height=20*dpr;
+      const W=miniCanvas.width, H=miniCanvas.height;
+      miniCtx.clearRect(0,0,W,H);
+      const t=Date.now()/1000;
+      if(!analyser||!playing){
+        miniCtx.beginPath();
+        for(let i=0;i<W;i++){
+          const y=H/2+Math.sin(i/W*Math.PI*3+t*1.8)*H*0.18;
+          i===0?miniCtx.moveTo(i,y):miniCtx.lineTo(i,y);
         }
-      });
-    }
-
-    setInterval(() => {
-      if (isPlaying) {
-        panel.querySelectorAll('.lio-seq-cell').forEach((c) => {
-          const idx = parseInt(c.dataset.idx);
-          c.classList.toggle('active-step', idx === currentStep % 16);
-        });
-      }
-    }, 50);
-
-    // populate pattern select
-    Object.keys(drumPatterns).forEach(k => {
-      const opt = document.createElement('option');
-      opt.value = k; opt.textContent = k.charAt(0).toUpperCase() + k.slice(1);
-      patternSel.appendChild(opt);
-    });
-    patternSel.value = state.drumPattern || 'standard';
-    patternSel.addEventListener('change', () => {
-      state.drumPattern = patternSel.value;
-      livePattern = JSON.parse(JSON.stringify(drumPatterns[state.drumPattern]));
-      buildSeqRows(); saveState();
-    });
-
-    seqSaveBtn.addEventListener('click', () => {
-      state._customPattern = JSON.parse(JSON.stringify(livePattern));
-      state.drumPattern = '_custom';
-      saveState(); setStatus('pattern saved');
-    });
-
-    seqRandBtn.addEventListener('click', () => {
-      ['kick', 'snare', 'hat', 'ohat'].forEach(type => {
-        const chances = { kick: 0.2, snare: 0.15, hat: 0.5, ohat: 0.08 };
-        for (let i = 0; i < 16; i++) livePattern[type][i] = Math.random() < chances[type] ? 1 : 0;
-      });
-      buildSeqRows();
-    });
-
-    buildSeqRows();
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // PRESET CARDS
-    // ═══════════════════════════════════════════════════════════════════════════
-    function buildPresetCards() {
-      presetCardsEl.innerHTML = '';
-      const all = getAllGenres();
-      Object.entries(all).forEach(([key, p]) => {
-        const isCustom = key.startsWith('custom_');
-        const card = document.createElement('div');
-        card.className = `lio-preset-card${state.preset === key ? ' active' : ''}`;
-        card.innerHTML = `
-          <div class="lio-preset-card-icon">${genreIcon(p.genre)}</div>
-          <div class="lio-preset-card-info">
-            <div class="lio-preset-card-name">${p.name}</div>
-            <div class="lio-preset-card-meta">${p.scale || ''} · ${p.wave || ''}</div>
-          </div>
-          <div class="lio-preset-card-bpm">${p.bpm || '?'}</div>
-          <div class="lio-preset-badge">${isCustom ? 'custom' : (p.genre || '')}</div>
-        `;
-        card.addEventListener('click', () => { applyPreset(key); buildPresetCards(); });
-        presetCardsEl.appendChild(card);
-      });
-    }
-
-    function applyPreset(key) {
-      const all = getAllGenres();
-      const p = all[key];
-      if (!p) return;
-      state.preset = key;
-      state.bpm = p.bpm || 120;
-      state.reverbWet = p.reverbWet !== undefined ? p.reverbWet : 0.2;
-      state.filterCutoff = p.filterCutoff !== undefined ? p.filterCutoff : 0.5;
-      state.arpMode = !!p.arpMode;
-      state.chordMode = p.chordMode !== undefined ? p.chordMode : true;
-      state.drumPattern = p.drumPattern || 'standard';
-      state.bassIntensity = p.bassIntensity !== undefined ? p.bassIntensity : 0.7;
-      state.melodyDensity = p.melodyDensity !== undefined ? p.melodyDensity : 0.5;
-      state.swing = p.swing !== undefined ? p.swing : 0.06;
-      livePattern = JSON.parse(JSON.stringify(drumPatterns[state.drumPattern] || drumPatterns.standard));
-      presetSel.value = key;
-      renderAll();
-      buildSeqRows();
-      if (isPlaying && audioCtx) {
-        rng = mulberry32(hashString(`${state.seed}|${state.preset}|lio3`));
-        currentStep = 0; nextNoteTime = audioCtx.currentTime + 0.05;
-      }
-      saveState();
-      setStatus(`loaded: ${p.name}`);
-    }
-
-    // populate main preset select
-    function buildPresetSel() {
-      presetSel.innerHTML = '';
-      const all = getAllGenres();
-      Object.entries(all).forEach(([key, p]) => {
-        const opt = document.createElement('option');
-        opt.value = key; opt.textContent = p.name;
-        presetSel.appendChild(opt);
-      });
-      presetSel.value = state.preset;
-    }
-
-    // populate voicing select
-    Object.keys(chordVoicings).forEach(k => {
-      const opt = document.createElement('option');
-      opt.value = k; opt.textContent = k.charAt(0).toUpperCase() + k.slice(1);
-      voicingSel.appendChild(opt);
-    });
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // TOGGLE BINDING HELPER
-    // ═══════════════════════════════════════════════════════════════════════════
-    function updateToggle(labelId, checkbox, val) {
-      checkbox.checked = !!val;
-      const lbl = el('#' + labelId);
-      if (lbl) lbl.classList.toggle('on', !!val);
-    }
-
-    function bindToggle(labelId, checkboxId, stateKey, callback) {
-      const lbl = el('#' + labelId);
-      const chk = el('#' + checkboxId);
-      if (!lbl || !chk) return;
-      lbl.addEventListener('click', () => {
-        const newVal = !chk.checked;
-        chk.checked = newVal;
-        state[stateKey] = newVal;
-        lbl.classList.toggle('on', newVal);
-        if (callback) callback(newVal);
-        saveState();
-      });
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // RENDER ALL VALUES — sync UI to state
-    // ═══════════════════════════════════════════════════════════════════════════
-    function renderAll() {
-      bpmInput.value = state.bpm; el('#lioBpmVal').textContent = state.bpm;
-      energyInput.value = state.energy; el('#lioEnergyVal').textContent = Math.round(state.energy * 100) + '%';
-      volumeInput.value = state.volume; el('#lioVolVal').textContent = Math.round(state.volume * 100) + '%';
-      seedInput.value = state.seed;
-      revWetInput.value = state.reverbWet || 0.18; el('#lioRevVal').textContent = Math.round((state.reverbWet || 0.18) * 100) + '%';
-      filterInput.value = state.filterCutoff || 0.5; el('#lioFilterVal').textContent = Math.round((state.filterCutoff || 0.5) * 100) + '%';
-      bassIntInput.value = state.bassIntensity || 0.7; el('#lioBassIntVal').textContent = Math.round((state.bassIntensity || 0.7) * 100) + '%';
-      melDensInput.value = state.melodyDensity || 0.5; el('#lioMelDensVal').textContent = Math.round((state.melodyDensity || 0.5) * 100) + '%';
-      swingInput.value = state.swing || 0.06; el('#lioSwingVal').textContent = Math.round((state.swing || 0.06) * 100) + '%';
-      eqBassIn.value = state.eqBass || 0.5; eqLowIn.value = state.eqLow || 0.5;
-      eqMidIn.value = state.eqMid || 0.5; eqHighIn.value = state.eqHigh || 0.5; eqAirIn.value = state.eqAir || 0.5;
-      arpRateSel.value = String(state.arpRate || 2);
-      voicingSel.value = state.chordVoicing || 'triad';
-      vizModeSel.value = state.vizMode || 'bars';
-      sleepSel.value = String(state.sleepTimer || 0);
-      updateToggle('ltDrums', drumsChk, state.drums);
-      updateToggle('ltBass', bassChk, state.bass);
-      updateToggle('ltMelody', melodyChk, state.melody);
-      updateToggle('ltFx', fxChk, state.fx);
-      updateToggle('ltReverb', reverbChk, state.reverb);
-      updateToggle('ltViz', vizChk, state.visualizer);
-      updateToggle('ltArp', arpChk, state.arpMode);
-      updateToggle('ltChord', chordChk, state.chordMode);
-      updateToggle('ltSong', songModeChk, state.songMode);
-      songSpeedSel.value = String(state.songModeSpeed || 0.5);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // TAB SWITCHING
-    // ═══════════════════════════════════════════════════════════════════════════
-    tabs.forEach(tab => {
-      tab.addEventListener('click', () => {
-        tabs.forEach(t => t.classList.remove('active'));
-        panel.querySelectorAll('.lio-pane').forEach(p => p.classList.remove('active'));
-        tab.classList.add('active');
-        const pane = el(`#lioPane-${tab.dataset.tab}`);
-        if (pane) pane.classList.add('active');
-        state.activeTab = tab.dataset.tab;
-        if (tab.dataset.tab === 'genres') buildPresetCards();
-        if (tab.dataset.tab === 'build') buildCustomList();
-        if (tab.dataset.tab === 'theme') buildThemeSwatches();
-        if (tab.dataset.tab === 'live') updateTornStatusUI();
-        saveState();
-      });
-    });
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // DRAG TO MOVE
-    // ═══════════════════════════════════════════════════════════════════════════
-    let drag = null;
-    [dragBar, panel.querySelector('.lio-handle')].forEach(dragEl => {
-      if (!dragEl) return;
-      dragEl.addEventListener('pointerdown', e => {
-        if (e.target.closest('button,input,select,label')) return;
-        state.collapsed = false; panel.classList.remove('lio-collapsed');
-        drag = { dx: e.clientX - panel.offsetLeft, dy: e.clientY - panel.offsetTop };
-        dragEl.setPointerCapture?.(e.pointerId);
-        e.preventDefault();
-      });
-      dragEl.addEventListener('pointermove', e => {
-        if (!drag) return;
-        state.x = clamp(e.clientX - drag.dx, 6, Math.max(6, innerWidth - panel.offsetWidth - 6));
-        state.y = clamp(e.clientY - drag.dy, 6, Math.max(6, innerHeight - panel.offsetHeight - 6));
-        panel.style.left = state.x + 'px'; panel.style.top = state.y + 'px';
-      });
-      dragEl.addEventListener('pointerup', () => { if (drag) { drag = null; saveState(); } });
-      dragEl.addEventListener('pointercancel', () => { drag = null; });
-    });
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // COLLAPSE / MINI
-    // ═══════════════════════════════════════════════════════════════════════════
-    collapseBtn.addEventListener('click', () => {
-      state.collapsed = !state.collapsed;
-      panel.classList.toggle('lio-collapsed', state.collapsed);
-      saveState();
-    });
-    miniBtn.addEventListener('click', () => {
-      state.miniplayer = !state.miniplayer;
-      panel.classList.toggle('lio-mini', state.miniplayer);
-      saveState();
-    });
-    miniExpandBtn.addEventListener('click', () => {
-      state.miniplayer = false;
-      panel.classList.remove('lio-mini');
-      saveState();
-    });
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // PLAY CONTROLS
-    // ═══════════════════════════════════════════════════════════════════════════
-    playBtn.addEventListener('click', () => { isPlaying ? stopMusic() : startMusic(); });
-    miniPlayBtn.addEventListener('click', () => { isPlaying ? stopMusic() : startMusic(); });
-    panicBtn.addEventListener('click', panicStop);
-
-    presetSel.addEventListener('change', () => applyPreset(presetSel.value));
-
-    bpmInput.addEventListener('input', () => { state.bpm = Number(bpmInput.value); el('#lioBpmVal').textContent = state.bpm; saveState(); });
-    energyInput.addEventListener('input', () => { state.energy = Number(energyInput.value); el('#lioEnergyVal').textContent = Math.round(state.energy * 100) + '%'; saveState(); });
-    volumeInput.addEventListener('input', () => { state.volume = Number(volumeInput.value); el('#lioVolVal').textContent = Math.round(state.volume * 100) + '%'; updateAudio(); saveState(); });
-    seedInput.addEventListener('change', () => {
-      state.seed = seedInput.value.trim() || 'torn-war-777';
-      seedInput.value = state.seed;
-      if (isPlaying && audioCtx) { rng = mulberry32(hashString(`${state.seed}|${state.preset}|lio3`)); currentStep = 0; nextNoteTime = audioCtx.currentTime + 0.05; }
-      saveState(); setStatus(`seed: ${state.seed}`);
-    });
-
-    newSeedBtn.addEventListener('click', () => {
-      const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-      let s = 'torn-'; for (let i = 0; i < 8; i++) s += chars[Math.floor(Math.random() * chars.length)];
-      state.seed = s; seedInput.value = s;
-      if (isPlaying && audioCtx) { rng = mulberry32(hashString(`${state.seed}|${state.preset}|lio3`)); currentStep = 0; nextNoteTime = audioCtx.currentTime + 0.05; }
-      saveState(); setStatus(`new seed: ${s}`);
-    });
-
-    randomizeBtn.addEventListener('click', () => {
-      const keys = Object.keys(getAllGenres());
-      applyPreset(keys[Math.floor(Math.random() * keys.length)]);
-      state.energy = Number((0.3 + Math.random() * 0.65).toFixed(2));
-      energyInput.value = state.energy; el('#lioEnergyVal').textContent = Math.round(state.energy * 100) + '%';
-      newSeedBtn.click();
-      saveState();
-    });
-
-    // 🎱 Jam button — nudge one random parameter for a happy accident
-    jamBtn.addEventListener('click', () => {
-      const params = ['energy', 'filterCutoff', 'reverbWet', 'bassIntensity', 'melodyDensity', 'swing'];
-      const p = params[Math.floor(Math.random() * params.length)];
-      const delta = (Math.random() - 0.5) * 0.3;
-      state[p] = clamp((state[p] || 0.5) + delta, 0, p === 'swing' ? 0.4 : 1);
-      renderAll();
-      updateAudio();
-      saveState();
-      setStatus(`jam: ${p} nudged`);
-    });
-
-    // 💤 Sleep button — cycle through timer options
-    sleepBtn.addEventListener('click', () => {
-      const options = [0, 5, 10, 15, 30, 60];
-      const current = state.sleepTimer || 0;
-      const idx = options.indexOf(current);
-      const next = options[(idx + 1) % options.length];
-      state.sleepTimer = next;
-      sleepSel.value = String(next);
-      if (next > 0) {
-        startSleepTimer(next);
-        setStatus(`sleep: ${next}min`);
-      } else {
-        clearSleepTimer();
-        setStatus('sleep off');
-      }
-      saveState();
-    });
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // SOUND TAB BINDINGS
-    // ═══════════════════════════════════════════════════════════════════════════
-    bindToggle('ltDrums', 'lioDrums', 'drums');
-    bindToggle('ltBass', 'lioBass', 'bass');
-    bindToggle('ltMelody', 'lioMelody', 'melody');
-    bindToggle('ltFx', 'lioFx', 'fx', () => updateAudio());
-    bindToggle('ltReverb', 'lioReverb', 'reverb', () => updateAudio());
-    bindToggle('ltViz', 'lioViz', 'visualizer');
-    bindToggle('ltArp', 'lioArp', 'arpMode');
-    bindToggle('ltChord', 'lioChord', 'chordMode');
-    bindToggle('ltSong', 'lioSongMode', 'songMode', (v) => {
-      if (v && isPlaying) {
-        if (window._lioSongInterval) clearInterval(window._lioSongInterval);
-        window._lioSongInterval = setInterval(songModeTick, 200);
-        pickSongTargets();
-      } else if (!v && window._lioSongInterval) {
-        clearInterval(window._lioSongInterval);
-        window._lioSongInterval = null;
-      }
-    });
-
-    revWetInput.addEventListener('input', () => { state.reverbWet = Number(revWetInput.value); el('#lioRevVal').textContent = Math.round(state.reverbWet * 100) + '%'; updateAudio(); saveState(); });
-    filterInput.addEventListener('input', () => { state.filterCutoff = Number(filterInput.value); el('#lioFilterVal').textContent = Math.round(state.filterCutoff * 100) + '%'; saveState(); });
-    bassIntInput.addEventListener('input', () => { state.bassIntensity = Number(bassIntInput.value); el('#lioBassIntVal').textContent = Math.round(state.bassIntensity * 100) + '%'; saveState(); });
-    melDensInput.addEventListener('input', () => { state.melodyDensity = Number(melDensInput.value); el('#lioMelDensVal').textContent = Math.round(state.melodyDensity * 100) + '%'; saveState(); });
-    swingInput.addEventListener('input', () => { state.swing = Number(swingInput.value); el('#lioSwingVal').textContent = Math.round(state.swing * 100) + '%'; saveState(); });
-
-    // EQ
-    [[eqBassIn, 'eqBass'], [eqLowIn, 'eqLow'], [eqMidIn, 'eqMid'], [eqHighIn, 'eqHigh'], [eqAirIn, 'eqAir']].forEach(([el2, key]) => {
-      el2.addEventListener('input', () => { state[key] = Number(el2.value); updateEq(); saveState(); });
-    });
-
-    arpRateSel.addEventListener('change', () => { state.arpRate = Number(arpRateSel.value); saveState(); });
-    voicingSel.addEventListener('change', () => { state.chordVoicing = voicingSel.value; saveState(); });
-    songSpeedSel.addEventListener('change', () => { state.songModeSpeed = Number(songSpeedSel.value); saveState(); });
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // CUSTOM GENRE BUILDER
-    // ═══════════════════════════════════════════════════════════════════════════
-    const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-    for (let midi = 36; midi <= 72; midi++) {
-      const opt = document.createElement('option');
-      opt.value = midi; opt.textContent = `${noteNames[midi % 12]}${Math.floor(midi / 12) - 1} (${midi})`;
-      cbRoot.appendChild(opt);
-    }
-    cbRoot.value = 45;
-
-    Object.entries(scaleNames).forEach(([key, name]) => {
-      const opt = document.createElement('option');
-      opt.value = key; opt.textContent = name;
-      cbScale.appendChild(opt);
-    });
-
-    Object.keys(drumPatterns).forEach(k => {
-      const opt = document.createElement('option');
-      opt.value = k; opt.textContent = k.charAt(0).toUpperCase() + k.slice(1);
-      cbDrum.appendChild(opt);
-    });
-
-    const genreTags = ['custom', 'cyberpunk', 'lofi', 'electronic', 'ambient', 'synthwave', 'jazz', 'trap', 'blues', 'citypop', 'metal', 'world', 'experimental', 'latin'];
-    genreTags.forEach(g => {
-      const opt = document.createElement('option');
-      opt.value = g; opt.textContent = g.charAt(0).toUpperCase() + g.slice(1);
-      cbGenre.appendChild(opt);
-    });
-
-    cbLoadBtn.addEventListener('click', () => {
-      const p = getAllGenres()[state.preset];
-      if (!p) return;
-      cbName.value = p.name + ' copy';
-      cbRoot.value = p.root || 45; cbScale.value = p.scale || 'minor';
-      cbBpm.value = p.bpm || 120; cbSwing.value = p.swing || 0.05;
-      cbWave.value = p.wave || 'sawtooth'; cbBassWave.value = p.bassWave || 'sine';
-      cbChords.value = (p.chords || [0, 5, 3, 6]).join(',');
-      cbDrum.value = p.drumPattern || 'standard'; cbGenre.value = p.genre || 'custom';
-      cbReverb.value = p.reverbWet || 0.2; cbFilter.value = p.filterCutoff || 0.5;
-      cbBassInt.value = p.bassIntensity || 0.7; cbMelDens.value = p.melodyDensity || 0.5;
-      cbStatus.textContent = 'loaded from: ' + p.name;
-    });
-
-    cbSaveBtn.addEventListener('click', () => {
-      const name = cbName.value.trim();
-      if (!name) { cbStatus.textContent = 'need a name'; return; }
-      const chordsRaw = cbChords.value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
-      if (!chordsRaw.length) { cbStatus.textContent = 'need chord degrees'; return; }
-      const key = name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '').slice(0, 24);
-      state.customGenres[key] = {
-        name, genre: cbGenre.value,
-        root: Number(cbRoot.value) || 45, scale: cbScale.value,
-        bpm: clamp(Number(cbBpm.value) || 120, 40, 240),
-        swing: clamp(Number(cbSwing.value) || 0.05, 0, 0.4),
-        wave: cbWave.value, bassWave: cbBassWave.value,
-        chords: chordsRaw, drumPattern: cbDrum.value,
-        reverbWet: clamp(Number(cbReverb.value) || 0.2, 0, 1),
-        filterCutoff: clamp(Number(cbFilter.value) || 0.5, 0, 1),
-        bassIntensity: clamp(Number(cbBassInt.value) || 0.7, 0, 1),
-        melodyDensity: clamp(Number(cbMelDens.value) || 0.5, 0, 1),
-        arpMode: false, chordMode: true,
-      };
-      saveState(); buildPresetSel(); buildCustomList();
-      cbStatus.textContent = 'saved: ' + name;
-      setStatus('genre saved: ' + name);
-    });
-
-    // export/import
-    cbExportBtn.addEventListener('click', () => {
-      const data = JSON.stringify(state.customGenres || {}, null, 2);
-      const blob = new Blob([data], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = 'lio-genres.json';
-      a.click();
-      URL.revokeObjectURL(url);
-    });
-
-    cbImportBtn.addEventListener('click', () => {
-      cbImportArea.style.display = cbImportArea.style.display === 'none' ? 'block' : 'none';
-    });
-
-    cbImportDoBtn.addEventListener('click', () => {
-      try {
-        const data = JSON.parse(cbImportText.value);
-        if (typeof data === 'object') {
-          Object.assign(state.customGenres, data);
-          saveState(); buildPresetSel(); buildCustomList();
-          cbStatus.textContent = 'imported!';
-        }
-      } catch { cbStatus.textContent = 'invalid JSON'; }
-    });
-
-    function buildCustomList() {
-      customListEl.innerHTML = '';
-      const customs = state.customGenres || {};
-      if (!Object.keys(customs).length) {
-        customListEl.innerHTML = '<div style="font-size:8px;color:var(--lio-dim);padding:4px">no custom genres yet. make one above.</div>';
+        miniCtx.strokeStyle='rgba(160,100,255,0.35)'; miniCtx.lineWidth=1; miniCtx.stroke();
         return;
       }
-      Object.entries(customs).forEach(([key, p]) => {
-        const row = document.createElement('div');
-        row.style.cssText = 'display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:4px 6px;background:rgba(128,128,128,0.05);border-radius:6px;border:1px solid rgba(128,128,128,0.08)';
-        row.innerHTML = `
-          <span style="font-size:12px">${genreIcon(p.genre)}</span>
-          <span style="flex:1;font-size:9px;color:var(--lio-text);font-weight:700">${p.name}</span>
-          <span style="font-size:8px;color:var(--lio-dim)">${p.bpm}bpm</span>
+      analyser.getByteFrequencyData(analyserData);
+      const bins=analyserData.length, bw=W/bins;
+      for(let i=0;i<bins;i++){
+        const v=analyserData[i]/255;
+        miniCtx.fillStyle=`hsla(${270-v*130},70%,55%,${0.6+v*0.4})`;
+        miniCtx.fillRect(i*bw,H-v*H,bw-0.3,v*H);
+      }
+    }
+    drawMini();
+
+    // ── SEQUENCER UI ─────────────────────────────────────────────────────────
+    function buildSeqRows(){
+      ['kick','snare','hat','ohat'].forEach(type=>{
+        const row=panel.querySelector(`#lSeq${type.charAt(0).toUpperCase()+type.slice(1)}`);
+        while(row.children.length>1) row.removeChild(row.lastChild);
+        for(let i=0;i<16;i++){
+          const c=document.createElement('div');
+          c.className=`seq-cell ${type}${livePat[type][i]?' on':''}`;
+          c.addEventListener('click',()=>{
+            livePat[type][i]=livePat[type][i]?0:1;
+            c.classList.toggle('on',!!livePat[type][i]);
+          });
+          row.appendChild(c);
+        }
+      });
+    }
+
+    setInterval(()=>{
+      if(!playing) return;
+      const cur=step%16;
+      panel.querySelectorAll('.seq-cell').forEach((c,i)=>{
+        c.classList.toggle('cur',i%16===cur);
+      });
+    },40);
+
+    Object.keys(DRUM_PATTERNS).forEach(k=>{
+      const o=document.createElement('option');
+      o.value=k; o.textContent=k.charAt(0).toUpperCase()+k.slice(1);
+      patSel.appendChild(o);
+    });
+    patSel.value=state.drumPattern||'standard';
+    patSel.addEventListener('change',()=>{
+      state.drumPattern=patSel.value;
+      livePat=JSON.parse(JSON.stringify(DRUM_PATTERNS[state.drumPattern]));
+      buildSeqRows(); saveState();
+    });
+    seqSave.addEventListener('click',()=>{
+      state._customPat=JSON.parse(JSON.stringify(livePat));
+      saveState(); setStatus('Custom pattern saved');
+    });
+    seqRand.addEventListener('click',()=>{
+      ['kick','snare','hat','ohat'].forEach(tp=>{
+        const ch={kick:0.2,snare:0.15,hat:0.5,ohat:0.08};
+        for(let i=0;i<16;i++) livePat[tp][i]=Math.random()<ch[tp]?1:0;
+      });
+      buildSeqRows();
+    });
+    buildSeqRows();
+
+    // ── PRESET CARDS ─────────────────────────────────────────────────────────
+    function buildCards(){
+      const cont=panel.querySelector('#lPCards');
+      cont.innerHTML='';
+      Object.entries(allPresets()).forEach(([k,p])=>{
+        const d=document.createElement('div');
+        d.className='pcard'+(state.preset===k?' on':'');
+        d.innerHTML=`
+          <div class="pcard-icon">${iconForGenre(p.genre)}</div>
+          <div class="pcard-info">
+            <div class="pcard-name">${p.name}</div>
+            <div class="pcard-meta">${p.scale||''} · ${p.wave||''}</div>
+          </div>
+          <div class="pcard-bpm">${p.bpm||'?'}</div>
+          <div class="pcard-tag">${k.startsWith('custom_')?'Custom':p.genre||''}</div>
         `;
-        const useBtn = document.createElement('button');
-        useBtn.textContent = 'use'; useBtn.style.cssText = 'padding:2px 6px;font-size:8px;min-width:0';
-        useBtn.addEventListener('click', () => { applyPreset('custom_' + key); buildPresetSel(); });
-        const delBtn = document.createElement('button');
-        delBtn.textContent = '✕'; delBtn.style.cssText = 'padding:2px 6px;font-size:8px;min-width:0;color:#ff8080';
-        delBtn.addEventListener('click', () => {
-          delete state.customGenres[key]; saveState(); buildCustomList(); buildPresetSel();
-        });
-        row.appendChild(useBtn); row.appendChild(delBtn);
-        customListEl.appendChild(row);
+        d.addEventListener('click',()=>{applyPreset(k);buildCards();});
+        cont.appendChild(d);
       });
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // THEME TAB
-    // ═══════════════════════════════════════════════════════════════════════════
-    function buildThemeSwatches() {
-      themeSwatches.innerHTML = '';
-      Object.entries(themes).forEach(([key, t]) => {
-        const sw = document.createElement('div');
-        sw.className = `lio-color-swatch${state.theme === key ? ' active' : ''}`;
-        sw.style.background = t.accent;
-        sw.title = t.name;
-        sw.addEventListener('click', () => {
-          state.theme = key;
-          applyThemeToPanel(panel);
-          buildThemeSwatches();
-          saveState();
-        });
-        themeSwatches.appendChild(sw);
+    // ── APPLY PRESET ─────────────────────────────────────────────────────────
+    function applyPreset(k){
+      const p=allPresets()[k]; if(!p) return;
+      state.preset=k; state.bpm=p.bpm||120;
+      state.reverbWet=p.rev!==undefined?p.rev:0.2;
+      state.filterCutoff=p.filter!==undefined?p.filter:0.5;
+      state.arpMode=!!p.arp; state.chordMode=p.chord!==undefined?p.chord:true;
+      state.drumPattern=p.drum||'standard';
+      state.bassIntensity=p.bassInt!==undefined?p.bassInt:0.7;
+      state.melodyDensity=p.melDens!==undefined?p.melDens:0.5;
+      livePat=JSON.parse(JSON.stringify(DRUM_PATTERNS[state.drumPattern]||DRUM_PATTERNS.standard));
+      presetSel.value=k;
+      bpmIn.value=state.bpm; bpmVal.textContent=state.bpm;
+      revWetIn.value=state.reverbWet; revV.textContent=Math.round(state.reverbWet*100)+'%';
+      filtIn.value=state.filterCutoff; filtV.textContent=Math.round(state.filterCutoff*100)+'%';
+      bassIntIn.value=state.bassIntensity; bassIntV.textContent=Math.round(state.bassIntensity*100)+'%';
+      melDIn.value=state.melodyDensity; melDV.textContent=Math.round(state.melodyDensity*100)+'%';
+      patSel.value=state.drumPattern;
+      setTg('tArp',arpChk,state.arpMode); setTg('tChord',chordChk,state.chordMode);
+      buildSeqRows();
+      miniName.textContent=p.name;
+      if(playing&&audioCtx){
+        rng=mulberry32(hashStr(`${state.seed}|${state.preset}|v3`));
+        step=0; nextT=audioCtx.currentTime+0.05;
+      }
+      saveState(); setStatus(`Loaded: ${p.name}`);
+    }
+
+    // ── BUILD PRESET SELECT ───────────────────────────────────────────────────
+    function buildPresetSel(){
+      presetSel.innerHTML='';
+      Object.entries(allPresets()).forEach(([k,p])=>{
+        const o=document.createElement('option');
+        o.value=k; o.textContent=p.name;
+        presetSel.appendChild(o);
+      });
+      presetSel.value=state.preset;
+    }
+
+    // ── POPULATE BUILD FORM ───────────────────────────────────────────────────
+    const noteNames=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+    for(let m=36;m<=72;m++){
+      const o=document.createElement('option');
+      o.value=m;
+      o.textContent=`${noteNames[m%12]}${Math.floor(m/12)-1} (${m})`;
+      cRoot.appendChild(o);
+    }
+    cRoot.value=45;
+    Object.entries(SCALE_NAMES).forEach(([k,v])=>{
+      const o=document.createElement('option'); o.value=k; o.textContent=v;
+      cScale.appendChild(o);
+    });
+    cScale.value='minor';
+    Object.keys(DRUM_PATTERNS).forEach(k=>{
+      const o=document.createElement('option'); o.value=k;
+      o.textContent=k.charAt(0).toUpperCase()+k.slice(1);
+      cDrum.appendChild(o);
+    });
+
+    // ── TOGGLES ──────────────────────────────────────────────────────────────
+    function setTg(labelId,chk,val){
+      chk.checked=!!val;
+      const lbl=panel.querySelector('#'+labelId);
+      if(lbl) lbl.classList.toggle('on',!!val);
+    }
+    function bindTg(labelId,chkId,key,cb){
+      const lbl=panel.querySelector('#'+labelId);
+      const chk=panel.querySelector('#'+chkId);
+      if(!lbl||!chk) return;
+      lbl.addEventListener('click',()=>{
+        const v=!chk.checked; chk.checked=v;
+        state[key]=v; lbl.classList.toggle('on',v);
+        if(cb) cb(v); saveState();
       });
     }
 
-    customColorInput.addEventListener('input', () => { state.customColor = customColorInput.value; });
-    applyCustomBtn.addEventListener('click', () => {
-      state.theme = 'custom';
-      applyThemeToPanel(panel);
-      buildThemeSwatches();
+    // ── SONG MODE LFO ENGINE ─────────────────────────────────────────────────
+    // Each param has its own LFO phase offset and random-walk drift
+    const LFO_PARAMS = {
+      energy:    { min:0.15, max:0.95, stateKey:'energy',        elId:'lEnergy',  valId:'lEnVal',   fmt:v=>Math.round(v*100)+'%' },
+      filter:    { min:0.1,  max:0.9,  stateKey:'filterCutoff',  elId:'lFilter',  valId:'lFiltVal', fmt:v=>Math.round(v*100)+'%' },
+      rev:       { min:0.0,  max:0.65, stateKey:'reverbWet',     elId:'lRevWet',  valId:'lRevVal',  fmt:v=>Math.round(v*100)+'%' },
+      bassInt:   { min:0.2,  max:0.95, stateKey:'bassIntensity', elId:'lBassInt', valId:'lBassIntVal', fmt:v=>Math.round(v*100)+'%' },
+      melDens:   { min:0.1,  max:0.85, stateKey:'melodyDensity', elId:'lMelDens', valId:'lMelDVal', fmt:v=>Math.round(v*100)+'%' },
+      bpm:       { min:70,   max:160,  stateKey:'bpm',           elId:'lBpm',     valId:'lBpmVal',  fmt:v=>Math.round(v) },
+      eqBass:    { min:0.1,  max:0.9,  stateKey:'eqBass',        elId:'lEqB',     valId:null,       fmt:v=>'' },
+      eqMid:     { min:0.1,  max:0.9,  stateKey:'eqMid',         elId:'lEqM',     valId:null,       fmt:v=>'' },
+      eqHigh:    { min:0.1,  max:0.9,  stateKey:'eqHigh',        elId:'lEqH',     valId:null,       fmt:v=>'' },
+      volume:    { min:0.1,  max:0.8,  stateKey:'volume',        elId:'lVolume',  valId:'lVolVal',  fmt:v=>Math.round(v*100)+'%' },
+    };
+    // per-param: phase offset (0..2π), random walk accumulator, user-override timer
+    const lfoState = {};
+    Object.keys(LFO_PARAMS).forEach(k=>{
+      lfoState[k]={phase:Math.random()*Math.PI*2, walk:0, overrideUntil:0};
+    });
+
+    // Toggle checkboxes for which params to modulate
+    const songModToggles = {
+      energy:'stEnergy', filter:'stFilter', rev:'stRev',
+      bassInt:'stBassInt', melDens:'stMelDens', bpm:'stBpm',
+      eqBass:'stEq', eqMid:'stEq', eqHigh:'stEq',
+      volume:'stVol',
+    };
+    function isSongParamEnabled(k){
+      const tId=songModToggles[k];
+      if(!tId) return true;
+      const el=panel.querySelector('#'+tId);
+      return el?el.classList.contains('on'):true;
+    }
+
+    // Song mode LFO tick — called every ~100ms
+    let songTimer=null;
+    let songBaseValues={};  // snapshot of values when song mode turned on
+
+    function snapshotBase(){
+      Object.entries(LFO_PARAMS).forEach(([k,p])=>{
+        songBaseValues[k]=state[p.stateKey];
+      });
+    }
+
+    function songTick(){
+      if(!state.songMode) return;
+      const now=Date.now();
+      const speed=state.songSpeed||30;
+      const depth=state.songDepth||0.35;
+      const turb=state.songTurbulence||0.2;
+      const dt=0.1; // 100ms tick
+
+      Object.entries(LFO_PARAMS).forEach(([k,p])=>{
+        if(!isSongParamEnabled(k)) return;
+        const ls=lfoState[k];
+        // don't modulate if user recently touched
+        if(now<ls.overrideUntil) return;
+
+        // advance LFO phase
+        ls.phase+=dt*(Math.PI*2/speed);
+        // add random walk jitter
+        ls.walk+=(Math.random()-0.5)*turb*0.12;
+        ls.walk*=0.94; // decay walk
+
+        const base=songBaseValues[k]!==undefined?songBaseValues[k]:(p.min+p.max)/2;
+        const range=(p.max-p.min)*depth*0.5;
+        const raw=base+Math.sin(ls.phase)*range+ls.walk*(p.max-p.min)*0.2;
+        const clamped=clamp(raw,p.min,p.max);
+
+        // Apply
+        const prev=state[p.stateKey];
+        state[p.stateKey]=clamped;
+
+        // Update UI if changed meaningfully
+        if(Math.abs(clamped-prev)>0.001){
+          const el=panel.querySelector('#'+p.elId);
+          if(el) el.value=String(clamped);
+          if(p.valId){
+            const vEl=panel.querySelector('#'+p.valId);
+            if(vEl){ vEl.textContent=p.fmt(clamped); vEl.classList.add('modulated'); }
+          }
+          // Live audio effects
+          if(k==='rev') updateAudio();
+          if(k.startsWith('eq')) updateEq();
+          if(k==='volume') updateAudio();
+        }
+      });
+    }
+
+    function startSongMode(){
+      snapshotBase();
+      if(songTimer) clearInterval(songTimer);
+      songTimer=setInterval(songTick,100);
+      state.songMode=true;
+      [songBtn,songTgl2].forEach(b=>{ b.textContent='♾ Song Mode'; b.classList.add('on'); });
       saveState();
-      setStatus('custom color applied');
-    });
-
-    vizModeSel.addEventListener('change', () => { state.vizMode = vizModeSel.value; saveState(); });
-    sleepSel.addEventListener('change', () => {
-      const val = Number(sleepSel.value);
-      state.sleepTimer = val;
-      if (val > 0) startSleepTimer(val);
-      else clearSleepTimer();
+    }
+    function stopSongMode(){
+      if(songTimer){clearInterval(songTimer);songTimer=null;}
+      state.songMode=false;
+      [songBtn,songTgl2].forEach(b=>{ b.textContent='♾ Song Mode'; b.classList.remove('on'); });
+      // Remove modulation markers
+      panel.querySelectorAll('.sr-val.modulated').forEach(e=>e.classList.remove('modulated'));
+      panel.querySelectorAll('input[type=range].modulated').forEach(e=>e.classList.remove('modulated'));
       saveState();
+    }
+
+    // Mark a slider as user-overridden so song mode backs off
+    function markOverride(paramKey){
+      if(!lfoState[paramKey]) return;
+      lfoState[paramKey].overrideUntil=Date.now()+8000; // 8 sec cooldown
+      // Update base to new user value
+      songBaseValues[paramKey]=state[LFO_PARAMS[paramKey]?.stateKey];
+      const vEl=panel.querySelector('#'+(LFO_PARAMS[paramKey]?.valId));
+      if(vEl) vEl.classList.remove('modulated');
+    }
+
+    // Song mode canvas (little animated display)
+    function drawSongViz(){
+      requestAnimationFrame(drawSongViz);
+      const dpr=window.devicePixelRatio||1;
+      const w=songCanvas.parentElement.clientWidth||200;
+      songCanvas.width=w*dpr; songCanvas.height=18*dpr;
+      const W=songCanvas.width, H=songCanvas.height;
+      songCtx.clearRect(0,0,W,H);
+      if(!state.songMode){
+        songCtx.fillStyle='rgba(255,200,40,0.08)';
+        songCtx.fillRect(0,0,W,H);
+        return;
+      }
+      const t=Date.now()/1000;
+      const sp=state.songSpeed||30;
+      // draw multiple sine waves, one per active param
+      const colors=['#ffcc40','#ff9030','#ff6060','#60ff80','#40c0ff','#c060ff'];
+      let ci=0;
+      Object.keys(LFO_PARAMS).forEach(k=>{
+        if(!isSongParamEnabled(k)) return;
+        const ls=lfoState[k];
+        songCtx.beginPath();
+        for(let i=0;i<W;i++){
+          const ph=ls.phase+(i/W)*Math.PI*4;
+          const y=H/2+Math.sin(ph)*H*0.38;
+          i===0?songCtx.moveTo(i,y):songCtx.lineTo(i,y);
+        }
+        songCtx.strokeStyle=colors[ci%colors.length]+'88';
+        songCtx.lineWidth=1; songCtx.stroke(); ci++;
+      });
+    }
+    drawSongViz();
+
+    // ── THEME SWATCHES ────────────────────────────────────────────────────────
+    const swatchColors={
+      default:'#a060ff', matrix:'#00ff41', oldschool:'#ffaa00',
+      torn:'#cc2222', ice:'#40d0ff', custom:'#ff80ff'
+    };
+    Object.entries(swatchColors).forEach(([k,color])=>{
+      const sw=document.createElement('div');
+      sw.className='swatch'+(state.theme===k?' on':'');
+      sw.style.background=color;
+      sw.title=THEMES[k]?THEMES[k].name||k:k;
+      sw.textContent=sw.title.slice(0,2);
+      sw.addEventListener('click',()=>{
+        state.theme=k; saveState();
+        applyTheme(k);
+        swatchCont.querySelectorAll('.swatch').forEach(s=>s.classList.remove('on'));
+        sw.classList.add('on');
+        customFields.style.display=k==='custom'?'block':'none';
+      });
+      swatchCont.appendChild(sw);
+    });
+    customFields.style.display=state.theme==='custom'?'block':'none';
+
+    accentColor.value=state.customThemeAccent||'#9060ff';
+    accentHex.value=state.customThemeAccent||'#9060ff';
+    bgOpIn.value=parseFloat((state.customThemeBg||'rgba(8,8,16,0.97)').match(/[\d.]+/g)?.[3]||'0.97');
+    bgOpV.textContent=Math.round(Number(bgOpIn.value)*100)+'%';
+
+    accentColor.addEventListener('input',()=>{ accentHex.value=accentColor.value; });
+    accentHex.addEventListener('input',()=>{
+      if(/^#[0-9a-fA-F]{6}$/.test(accentHex.value)) accentColor.value=accentHex.value;
+    });
+    bgOpIn.addEventListener('input',()=>{ bgOpV.textContent=Math.round(Number(bgOpIn.value)*100)+'%'; });
+    applyCustom.addEventListener('click',()=>{
+      const hex=accentColor.value;
+      const op=Number(bgOpIn.value)||0.97;
+      state.customThemeAccent=hex;
+      state.customThemeBg=`rgba(8,8,14,${op})`;
+      state.theme='custom'; saveState();
+      THEMES.custom=buildThemeVars('custom');
+      applyTheme('custom');
     });
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // LIVE TAB BINDINGS (v4 — Torn API)
-    // ═══════════════════════════════════════════════════════════════════════════
-    const tornKeyInput = el('#lioTornKey');
-    const tornKeySaveBtn = el('#lioTornKeySaveBtn');
-    const tornModeChk = el('#lioTornMode');
-    const tornIntensitySel = el('#lioTornIntensity');
-    const tornMapEnergyChk = el('#lioTornMapEnergy');
-    const tornMapNerveChk = el('#lioTornMapNerve');
-    const tornMapHappyChk = el('#lioTornMapHappy');
-    const tornMapLifeChk = el('#lioTornMapLife');
-    const tornMapCooldownsChk = el('#lioTornMapCooldowns');
-    const tornMapStatusChk = el('#lioTornMapStatus');
-    const tornMapTravelChk = el('#lioTornMapTravel');
-    const tornMapMoneyChk = el('#lioTornMapMoney');
+    // ── RENDER ALL VALUES ─────────────────────────────────────────────────────
+    function renderAll(){
+      bpmIn.value=state.bpm; bpmVal.textContent=state.bpm;
+      enIn.value=state.energy; enVal.textContent=Math.round(state.energy*100)+'%';
+      volIn.value=state.volume; volVal.textContent=Math.round(state.volume*100)+'%';
+      seedIn.value=state.seed;
+      bassIntIn.value=state.bassIntensity||0.7; bassIntV.textContent=Math.round((state.bassIntensity||0.7)*100)+'%';
+      melDIn.value=state.melodyDensity||0.5; melDV.textContent=Math.round((state.melodyDensity||0.5)*100)+'%';
+      filtIn.value=state.filterCutoff||0.5; filtV.textContent=Math.round((state.filterCutoff||0.5)*100)+'%';
+      revWetIn.value=state.reverbWet||0.18; revV.textContent=Math.round((state.reverbWet||0.18)*100)+'%';
+      const ap2=allPresets(); const sw2=ap2[state.preset]?.swing||0.06;
+      swingIn.value=sw2; swingVal.textContent=Math.round(sw2*100)+'%';
+      eqBIn.value=state.eqBass||0.5; eqLIn.value=state.eqLow||0.5;
+      eqMIn.value=state.eqMid||0.5; eqHIn.value=state.eqHigh||0.5; eqAIn.value=state.eqAir||0.5;
+      arpRateS.value=String(state.arpRate||2); voicS.value=state.chordVoicing||'triad';
+      songSp.value=state.songSpeed||30; songSpV.textContent=(state.songSpeed||30)+'s';
+      songDep.value=state.songDepth||0.35; songDepV.textContent=Math.round((state.songDepth||0.35)*100)+'%';
+      songTurb.value=state.songTurbulence||0.2; songTurbV.textContent=Math.round((state.songTurbulence||0.2)*100)+'%';
+      setTg('tDrums',drumsChk,state.drums); setTg('tBass',bassChk,state.bass);
+      setTg('tMelody',melChk,state.melody); setTg('tFx',fxChk,state.fx);
+      setTg('tRev',revChk,state.reverb); setTg('tViz',vizChk,state.visualizer);
+      setTg('tArp',arpChk,state.arpMode); setTg('tChord',chordChk,state.chordMode);
+      if(state.songMode) startSongMode();
+    }
 
-    // populate existing values
-    tornKeyInput.value = state.tornApiKey || '';
-    tornModeChk.checked = state.tornMode;
-    tornIntensitySel.value = String(state.tornMapIntensity || 0.7);
-    tornMapEnergyChk.checked = state.tornMapEnergy;
-    tornMapNerveChk.checked = state.tornMapNerve;
-    tornMapHappyChk.checked = state.tornMapHappy;
-    tornMapLifeChk.checked = state.tornMapLife;
-    tornMapCooldownsChk.checked = state.tornMapCooldowns;
-    tornMapStatusChk.checked = state.tornMapStatus;
-    tornMapTravelChk.checked = state.tornMapTravel;
-    tornMapMoneyChk.checked = state.tornMapMoney;
-
-    // update toggle visuals
-    ['ltTornMode','ltTornEnergy','ltTornNerve','ltTornHappy','ltTornLife','ltTornCd','ltTornStatus','ltTornTravel','ltTornMoney'].forEach(id => {
-      const lbl = el('#' + id);
-      const chk = lbl?.querySelector('input');
-      if (lbl && chk) lbl.classList.toggle('on', chk.checked);
+    // ── TAB SWITCHING ─────────────────────────────────────────────────────────
+    tabs.forEach(tab=>{
+      tab.addEventListener('click',()=>{
+        tabs.forEach(t=>t.classList.remove('on'));
+        panel.querySelectorAll('.pane').forEach(p2=>p2.classList.remove('on'));
+        tab.classList.add('on');
+        const pane=panel.querySelector('#lPane-'+tab.dataset.tab);
+        if(pane) pane.classList.add('on');
+        state.activeTab=tab.dataset.tab;
+        if(tab.dataset.tab==='genres') buildCards();
+        if(tab.dataset.tab==='build') buildCustomList();
+      });
     });
 
-    tornKeySaveBtn.addEventListener('click', () => {
-      state.tornApiKey = tornKeyInput.value.trim();
-      saveState();
-      setStatus('key saved');
-      if (state.tornMode) startTornPolling();
+    // ── DRAG ─────────────────────────────────────────────────────────────────
+    let drag=null;
+    function startDrag(e,el){
+      if(e.target.closest('button,input,select')) return;
+      state.collapsed=false; panel.classList.remove('collapsed');
+      drag={dx:e.clientX-panel.offsetLeft, dy:e.clientY-panel.offsetTop};
+      el.setPointerCapture?.(e.pointerId); e.preventDefault();
+    }
+    [dragBar,handle].forEach(el=>{
+      el.addEventListener('pointerdown',e=>startDrag(e,el));
+      el.addEventListener('pointermove',e=>{
+        if(!drag) return;
+        state.x=clamp(e.clientX-drag.dx,6,Math.max(6,innerWidth-panel.offsetWidth-6));
+        state.y=clamp(e.clientY-drag.dy,6,Math.max(6,innerHeight-panel.offsetHeight-6));
+        panel.style.left=state.x+'px'; panel.style.top=state.y+'px';
+      });
+      el.addEventListener('pointerup',()=>{if(drag){drag=null;saveState();}});
+      el.addEventListener('pointercancel',()=>drag=null);
+    });
+    handle.addEventListener('click',()=>{
+      if(drag) return;
+      state.collapsed=!state.collapsed;
+      panel.classList.toggle('collapsed',state.collapsed); saveState();
+    });
+    colBtn.addEventListener('click',()=>{
+      state.collapsed=!state.collapsed;
+      panel.classList.toggle('collapsed',state.collapsed); saveState();
     });
 
-    function bindTornToggle(labelId, checkbox, stateKey) {
-      const lbl = el('#' + labelId);
-      if (!lbl || !checkbox) return;
-      lbl.addEventListener('click', () => {
-        checkbox.checked = !checkbox.checked;
-        state[stateKey] = checkbox.checked;
-        lbl.classList.toggle('on', checkbox.checked);
+    // Miniplayer drag
+    let miniDrag=null, miniVisible=true;
+    mini.addEventListener('pointerdown',e=>{
+      if(e.target===miniPlay||e.target.closest('.mini-play')) return;
+      miniDrag={dx:e.clientX-mini.offsetLeft, dy:e.clientY-mini.offsetTop};
+      mini.setPointerCapture?.(e.pointerId); e.preventDefault();
+    });
+    mini.addEventListener('pointermove',e=>{
+      if(!miniDrag) return;
+      mini.style.left=clamp(e.clientX-miniDrag.dx,4,innerWidth-mini.offsetWidth-4)+'px';
+      mini.style.top=clamp(e.clientY-miniDrag.dy,4,innerHeight-mini.offsetHeight-4)+'px';
+    });
+    mini.addEventListener('pointerup',()=>{
+      if(miniDrag){ miniDrag=null; return; }
+      // click = expand panel
+      state.collapsed=false; panel.classList.remove('collapsed');
+    });
+    mini.addEventListener('pointercancel',()=>miniDrag=null);
+    mini.querySelector('.mini-expand').addEventListener('click',()=>{
+      state.collapsed=false; panel.classList.remove('collapsed');
+    });
+    miniPlay.addEventListener('click',e=>{
+      e.stopPropagation();
+      playing?stopMusic():startMusic();
+    });
+    miniBtn.addEventListener('click',()=>{
+      miniVisible=!miniVisible;
+      mini.style.display=miniVisible?'flex':'none';
+    });
+
+    // ── PLAY CONTROLS ─────────────────────────────────────────────────────────
+    playBtn.addEventListener('click',()=>playing?stopMusic():startMusic());
+    panicBtn.addEventListener('click',panicStop);
+    [songBtn,songTgl2].forEach(b=>{
+      b.addEventListener('click',()=>state.songMode?stopSongMode():startSongMode());
+    });
+
+    presetSel.addEventListener('change',()=>applyPreset(presetSel.value));
+
+    function bindSlider(elId,key,valId,fmt,cb,paramKey){
+      const el=panel.querySelector('#'+elId);
+      const vEl=valId?panel.querySelector('#'+valId):null;
+      if(!el) return;
+      el.addEventListener('input',()=>{
+        const v=Number(el.value); state[key]=v;
+        if(vEl) vEl.textContent=fmt(v);
+        if(cb) cb(v);
+        if(paramKey) markOverride(paramKey);
         saveState();
       });
     }
 
-    bindTornToggle('ltTornMode', tornModeChk, 'tornMode');
-    bindTornToggle('ltTornEnergy', tornMapEnergyChk, 'tornMapEnergy');
-    bindTornToggle('ltTornNerve', tornMapNerveChk, 'tornMapNerve');
-    bindTornToggle('ltTornHappy', tornMapHappyChk, 'tornMapHappy');
-    bindTornToggle('ltTornLife', tornMapLifeChk, 'tornMapLife');
-    bindTornToggle('ltTornCd', tornMapCooldownsChk, 'tornMapCooldowns');
-    bindTornToggle('ltTornStatus', tornMapStatusChk, 'tornMapStatus');
-    bindTornToggle('ltTornTravel', tornMapTravelChk, 'tornMapTravel');
-    bindTornToggle('ltTornMoney', tornMapMoneyChk, 'tornMapMoney');
+    bindSlider('lBpm','bpm','lBpmVal',v=>Math.round(v)+'',null,'bpm');
+    bindSlider('lEnergy','energy','lEnVal',v=>Math.round(v*100)+'%',null,'energy');
+    bindSlider('lVolume','volume','lVolVal',v=>Math.round(v*100)+'%',updateAudio,'volume');
+    bindSlider('lBassInt','bassIntensity','lBassIntVal',v=>Math.round(v*100)+'%',null,'bassInt');
+    bindSlider('lMelDens','melodyDensity','lMelDVal',v=>Math.round(v*100)+'%',null,'melDens');
+    bindSlider('lFilter','filterCutoff','lFiltVal',v=>Math.round(v*100)+'%',null,'filter');
+    bindSlider('lRevWet','reverbWet','lRevVal',v=>Math.round(v*100)+'%',updateAudio,'rev');
+    bindSlider('lEqB','eqBass',null,v=>'',updateEq,'eqBass');
+    bindSlider('lEqL','eqLow',null,v=>'',updateEq);
+    bindSlider('lEqM','eqMid',null,v=>'',updateEq,'eqMid');
+    bindSlider('lEqH','eqHigh',null,v=>'',updateEq,'eqHigh');
+    bindSlider('lEqA','eqAir',null,v=>'',updateEq);
 
-    tornIntensitySel.addEventListener('change', () => {
-      state.tornMapIntensity = Number(tornIntensitySel.value);
-      saveState();
+    songSp.addEventListener('input',()=>{ state.songSpeed=Number(songSp.value); songSpV.textContent=state.songSpeed+'s'; saveState(); });
+    songDep.addEventListener('input',()=>{ state.songDepth=Number(songDep.value); songDepV.textContent=Math.round(state.songDepth*100)+'%'; saveState(); });
+    songTurb.addEventListener('input',()=>{ state.songTurbulence=Number(songTurb.value); songTurbV.textContent=Math.round(state.songTurbulence*100)+'%'; saveState(); });
+
+    seedIn.addEventListener('change',()=>{
+      state.seed=seedIn.value.trim()||'torn-war-777'; seedIn.value=state.seed;
+      if(playing&&audioCtx){ rng=mulberry32(hashStr(`${state.seed}|${state.preset}|v3`)); step=0; nextT=audioCtx.currentTime+0.05; }
+      saveState(); setStatus('Seed: '+state.seed);
+    });
+    newSeedB.addEventListener('click',()=>{
+      const c='abcdefghijklmnopqrstuvwxyz0123456789';
+      let s='torn-'; for(let i=0;i<8;i++) s+=c[Math.floor(Math.random()*c.length)];
+      state.seed=s; seedIn.value=s;
+      if(playing&&audioCtx){ rng=mulberry32(hashStr(`${state.seed}|${state.preset}|v3`)); step=0; nextT=audioCtx.currentTime+0.05; }
+      saveState(); setStatus('New seed: '+s);
+    });
+    randB.addEventListener('click',()=>{
+      const ks=Object.keys(allPresets());
+      applyPreset(ks[Math.floor(Math.random()*ks.length)]);
+      state.energy=Number((0.3+Math.random()*0.65).toFixed(2));
+      enIn.value=state.energy; enVal.textContent=Math.round(state.energy*100)+'%';
+      newSeedB.click(); saveState();
     });
 
-    // start polling if already enabled
-    if (state.tornMode && state.tornApiKey) startTornPolling();
+    bindTg('tDrums','lDrums','drums');
+    bindTg('tBass','lBass','bass');
+    bindTg('tMelody','lMelody','melody');
+    bindTg('tFx','lFx','fx',()=>updateAudio());
+    bindTg('tRev','lRev','reverb',()=>updateAudio());
+    bindTg('tViz','lViz','visualizer');
+    bindTg('tArp','lArp','arpMode');
+    bindTg('tChord','lChord','chordMode');
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // PLACE PANEL — position on screen
-    // ═══════════════════════════════════════════════════════════════════════════
-    function placePanel() {
-      const W = panel.offsetWidth || 350, H = panel.offsetHeight || 450;
-      if (state.x === null) state.x = innerWidth - W - 10;
-      if (state.y === null) state.y = innerHeight - H - 80;
-      state.x = clamp(state.x, 6, Math.max(6, innerWidth - W - 6));
-      state.y = clamp(state.y, 6, Math.max(6, innerHeight - H - 6));
-      panel.style.left = state.x + 'px'; panel.style.top = state.y + 'px';
+    // Song mode sub-toggles
+    ['stEnergy','stFilter','stRev','stBassInt','stMelDens','stBpm','stEq','stVol'].forEach(id=>{
+      const el=panel.querySelector('#'+id);
+      if(!el) return;
+      const chk=el.querySelector('input');
+      el.addEventListener('click',()=>{
+        const v=!chk.checked; chk.checked=v; el.classList.toggle('on',v);
+      });
+    });
+
+    arpRateS.addEventListener('change',()=>{ state.arpRate=Number(arpRateS.value); saveState(); });
+    voicS.addEventListener('change',()=>{ state.chordVoicing=voicS.value; saveState(); });
+    swingIn.addEventListener('input',()=>{
+      const p=allPresets()[state.preset]; if(p) p.swing=Number(swingIn.value);
+      swingVal.textContent=Math.round(Number(swingIn.value)*100)+'%';
+    });
+
+    // ── CUSTOM GENRE ─────────────────────────────────────────────────────────
+    cLoad.addEventListener('click',()=>{
+      const p=allPresets()[state.preset]; if(!p) return;
+      cName.value=p.name+' Copy';
+      cRoot.value=p.root||45; cScale.value=p.scale||'minor';
+      cBpm.value=p.bpm||120; cSwing.value=p.swing||0.05;
+      cWave.value=p.wave||'sawtooth'; cBassWave.value=p.bassWave||'sine';
+      cChords.value=(p.chords||[0,5,3,6]).join(',');
+      cDrum.value=p.drum||p.drumPattern||'standard'; cGenre.value=p.genre||'custom';
+      cRev.value=p.rev||p.reverbWet||0.2; cFilt.value=p.filter||p.filterCutoff||0.5;
+      cBassInt.value=p.bassInt||p.bassIntensity||0.7; cMelD.value=p.melDens||p.melodyDensity||0.5;
+      cStatus.textContent='Loaded from: '+p.name;
+    });
+    cSave.addEventListener('click',()=>{
+      const name=cName.value.trim(); if(!name){cStatus.textContent='⚠ Need a name';return;}
+      const ch=cChords.value.split(',').map(s=>parseInt(s.trim())).filter(n=>!isNaN(n));
+      if(!ch.length){cStatus.textContent='⚠ Need chord degrees';return;}
+      const key=name.toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'').slice(0,24);
+      state.customGenres[key]={
+        name,genre:cGenre.value,root:Number(cRoot.value)||45,scale:cScale.value,
+        bpm:clamp(Number(cBpm.value)||120,40,240),swing:clamp(Number(cSwing.value)||0.05,0,0.4),
+        wave:cWave.value,bassWave:cBassWave.value,chords:ch,
+        drum:cDrum.value,
+        rev:clamp(Number(cRev.value)||0.2,0,1),filter:clamp(Number(cFilt.value)||0.5,0,1),
+        bassInt:clamp(Number(cBassInt.value)||0.7,0,1),melDens:clamp(Number(cMelD.value)||0.5,0,1),
+        arp:false,chord:true,
+      };
+      saveState(); buildPresetSel(); buildCustomList();
+      cStatus.textContent='✓ Saved: '+name;
+    });
+
+    function buildCustomList(){
+      const el=panel.querySelector('#lCustomList'); el.innerHTML='';
+      const c=state.customGenres||{};
+      if(!Object.keys(c).length){
+        el.innerHTML='<div style="font-size:8px;color:var(--lio-text-dim);padding:3px">No custom genres saved yet.</div>';
+        return;
+      }
+      Object.entries(c).forEach(([k,p])=>{
+        const row=document.createElement('div');
+        row.style.cssText='display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:4px 6px;background:rgba(255,255,255,0.04);border-radius:6px;border:1px solid rgba(255,255,255,0.06)';
+        row.innerHTML=`<span style="font-size:14px">${iconForGenre(p.genre)}</span><span style="flex:1;font-size:9px;font-weight:700;color:var(--lio-text)">${p.name}</span><span style="font-size:8px;color:var(--lio-text-dim)">${p.bpm}bpm</span>`;
+        const ub=document.createElement('button');
+        ub.textContent='Use'; ub.style.cssText='padding:2px 6px;font-size:8px';
+        ub.addEventListener('click',()=>{ applyPreset('custom_'+k); buildPresetSel(); });
+        const db=document.createElement('button');
+        db.textContent='✕'; db.style.cssText='padding:2px 6px;font-size:8px;color:#ff8080;border-color:rgba(255,80,80,0.3)';
+        db.addEventListener('click',()=>{
+          if(!confirm('Delete "'+p.name+'"?')) return;
+          delete state.customGenres[k]; saveState(); buildCustomList(); buildPresetSel();
+        });
+        row.appendChild(ub); row.appendChild(db); el.appendChild(row);
+      });
+    }
+
+    // ── PLACE PANELS ─────────────────────────────────────────────────────────
+    function placePanel(){
+      const W=panel.offsetWidth||358, H2=panel.offsetHeight||500;
+      if(state.x===null) state.x=innerWidth-W-10;
+      if(state.y===null) state.y=innerHeight-H2-80;
+      state.x=clamp(state.x,6,Math.max(6,innerWidth-W-6));
+      state.y=clamp(state.y,6,Math.max(6,innerHeight-H2-6));
+      panel.style.left=state.x+'px'; panel.style.top=state.y+'px';
       saveState();
     }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // INIT
-    // ═══════════════════════════════════════════════════════════════════════════
-    buildPresetSel();
-    renderAll();
-    buildCustomList();
-    buildThemeSwatches();
-    setTimeout(placePanel, 60);
-    window.addEventListener('resize', placePanel);
-
-    // restore custom pattern if saved
-    if (state._customPattern && state.drumPattern === '_custom') {
-      livePattern = JSON.parse(JSON.stringify(state._customPattern));
-      buildSeqRows();
+    function placeMini(){
+      mini.style.bottom='18px'; mini.style.right='18px';
+      mini.style.left=''; mini.style.top='';
     }
 
-    setStatus('v4 ready · tap START');
+    // ── INIT ─────────────────────────────────────────────────────────────────
+    buildPresetSel(); renderAll(); buildCustomList(); buildCards();
+    setTimeout(placePanel,60); placeMini();
+    window.addEventListener('resize',placePanel);
+    applyTheme(state.theme||'default');
 
-  }); // end ready/init
-})(); // end IIFE
+    if(state._customPat&&state.drumPattern==='_custom'){
+      livePat=JSON.parse(JSON.stringify(state._customPat)); buildSeqRows();
+    }
+
+    miniName.textContent=(allPresets()[state.preset]||{}).name||'?';
+    mini.style.display='flex';
+
+    setStatus('Tap ▶ START · v3.0');
+  });
+})();
