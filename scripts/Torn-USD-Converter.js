@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn USD Converter
 // @author       shaul [3908280]
-// @version      1.99
+// @version      1.99.2
 // @description  Convert Torn cash displays to USD equivalents
 // @match        https://www.torn.com/*
 // @grant        none
@@ -23,29 +23,35 @@
     //   "reversed"     →  §23.5M ($5.00)
     //   "full"         →  $5.00 (§23,500,001)
     //   "fullreversed" →  §23,500,001 ($5.00)    ← default
+    //   "simplified"   →  §1 (<$0.01)
     //   "original"     →  §23.5M
     const DISPLAY_MODE = "fullreversed";
 
     // Real-money value of 1 Torn dollar.
     // Update the numerator/denominator to change the exchange rate.
-    const USD_PER_TORN = 5 / 23_500_000;
+    const USD_PER_TORN = 5 / 23500000;
 
     // ─────────────────────────────────────────────
     // REGEX
     // ─────────────────────────────────────────────
 
     // Matches "$1,234", "$5.6M", "$2bil", "$1 million", etc.
-    // Suffix is optional and must be immediately followed by a non-word character
-    // so we don't accidentally grab the "M" in "Market" or "B" in "Billion".
+    // Suffix must be immediately followed by a non-word character so we don't
+    // accidentally grab the "M" in "Market" or the "B" in "Billion".
     const TORN_PRICE_REGEX =
-        /\$([\d,.]+ ?)([kMBT]|mil|bil| mil| bil| million| billion)?(?!\w)/g;
-
-    // Simpler version used when we only need the raw number from a single element.
-    const SINGLE_PRICE_REGEX = /\$([\d,.]+)/;
+        /\$([\d,.]+ ?)([kMBT]|mil|mill|bil|bill|million|billion|trillion)?(?!\w)/gi;
 
     // CSS selector for structured price blocks and generic price divs.
-    const PRICE_ELEMENT_SELECTOR =
-        'span[class*="displayPrice"], div[class*="price"], div[class*="priceandTotal"]';
+    const PRICE_ELEMENT_SELECTOR = [
+    'span[class*="displayPrice"]',
+    'div[class*="price"]',
+    'div[class*="priceAndTotal"]',
+    '[class*="winner"]',
+    '[class*="classified"]',
+    '[class*="reward"]',
+    '[class*="price"]',
+    '[class*="sum"]'
+    ].join(',');
 
     // ─────────────────────────────────────────────
     // PARSING
@@ -61,20 +67,22 @@
         const baseAmount = parseFloat(numericString.replace(/,/g, ''));
         if (Number.isNaN(baseAmount)) return null;
 
-        const normalizedSuffix = (suffix || '').trim().toLowerCase();
-
         const multipliers = {
-            'k': 1e3,
-            'm': 1e6,
-            'mil': 1e6,
-            'million': 1e6,
-            'b': 1e9,
-            'bil': 1e9,
-            'billion': 1e9,
-            't': 1e12,
+            'k':        1e3,
+            'm':        1e6,
+            'mil':      1e6,
+            'mill':     1e6,
+            'million':  1e6,
+            'b':        1e9,
+            'bil':      1e9,
+            'bill':     1e9,
+            'billion':  1e9,
+            't':        1e12,
+            'trillion': 1e12,
         };
 
-        return baseAmount * (multipliers[normalizedSuffix] ?? 1);
+        const key = (suffix || '').trim().toLowerCase();
+        return baseAmount * (multipliers[key] ?? 1);
     }
 
     /**
@@ -82,13 +90,15 @@
      * Returns null if no price is found.
      */
     function parseSinglePriceElement(elementText) {
-        const match = elementText.match(SINGLE_PRICE_REGEX);
+        const match = elementText.match(TORN_PRICE_REGEX);
         if (!match) return null;
 
-        const tornAmount = parseFloat(match[1].replace(/,/g, ''));
-        if (Number.isNaN(tornAmount)) return null;
+        // match[1] = numeric part, match[2] = optional suffix (may be undefined)
+        const tornAmount = parseTornAmount(match[1], match[2]);
+        if (tornAmount === null) return null;
 
-        return [formatAsTorn(tornAmount), formatAsUSD(tornAmount)];
+        const abbrev = DISPLAY_MODE === 'converted' || DISPLAY_MODE === 'combined' || DISPLAY_MODE === 'reversed';
+        return [formatAsTorn(tornAmount, abbrev), formatAsUSD(tornAmount)];
     }
 
     /**
@@ -101,24 +111,18 @@
             if (tornAmount == null) return fullMatch;
 
             const originalWithTornSymbol = fullMatch.replace('$', '§');
-            const tornFormatted = formatAsTorn(tornAmount);
-            const usdFormatted = formatAsUSD(tornAmount);
+            const abbrev = DISPLAY_MODE === 'converted' || DISPLAY_MODE === 'combined' || DISPLAY_MODE === 'reversed';
+            const tornFormatted = formatAsTorn(tornAmount, abbrev);
+            const usdFormatted  = formatAsUSD(tornAmount);
 
             switch (DISPLAY_MODE) {
-                case 'converted':
-                    return usdFormatted;
-                case 'combined':
-                    return `${usdFormatted} (${tornFormatted}) `;
-                case 'reversed':
-                    return `${tornFormatted} (${usdFormatted}) `;
-                case 'full':
-                    return `${usdFormatted} (${originalWithTornSymbol}) `;
-                case 'fullreversed':
-                    return `${originalWithTornSymbol} (${usdFormatted}) `;
-                case 'original':
-                    return originalWithTornSymbol;
-                default:
-                    return fullMatch;
+                case 'converted':    return usdFormatted;
+                case 'combined':     return `${usdFormatted} (${tornFormatted}) `;
+                case 'reversed':     return `${tornFormatted} (${usdFormatted}) `;
+                case 'full':         return `${usdFormatted} (${originalWithTornSymbol}) `;
+                case 'fullreversed': return `${originalWithTornSymbol} (${usdFormatted}) `;
+                case 'original':     return originalWithTornSymbol;
+                default:             return fullMatch;
             }
         });
     }
@@ -128,25 +132,35 @@
     // ─────────────────────────────────────────────
 
     /**
-     * Format a Torn-dollar amount as a USD string with appropriate decimal places.
+     * Format a Torn-dollar amount as a USD string.
+     * Once the value hits USD_CENTS_THRESHOLD ($0.02) we round to cents —
+     * at that point sub-cent precision is more noise than signal.
      */
     function formatAsUSD(tornAmount) {
-        const usdValue = tornAmount * USD_PER_TORN;
+        const usd = tornAmount * USD_PER_TORN;
 
-        if (usdValue === 0) return '$0';
-        if (usdValue <= 0.000001) return '$' + usdValue.toFixed(7);
-        if (usdValue <= 0.00001) return '$' + usdValue.toFixed(6);
-        if (usdValue <= 0.0001) return '$' + usdValue.toFixed(5);
-        if (usdValue >= 9999) return '$' + usdValue.toFixed(0);
-        if (usdValue >= 0.02) return '$' + usdValue.toFixed(2);
-
-        return '$' + usdValue.toFixed(4);
+        if (usd === 0)                       return '$0';
+        if (tornAmount >= 94000) {
+            // Round to nearest cent; use locale formatting for large values.
+            return '$' + usd.toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+            });
+        }
+        // Sub-cent: show as many decimal places as needed to see at least one sig fig.
+        if (usd >= 0.001)  return '$' + usd.toFixed(4);
+        if (usd >= 0.0001) return '$' + usd.toFixed(5);
+        if (usd >= 0.00001) return '$' + usd.toFixed(6);
+        return '$' + usd.toFixed(7);
     }
 
     /**
      * Format a Torn-dollar amount using the § currency symbol with T/B/M/k suffixes.
+     * Values under 1,000 are always shown as plain integers (e.g. §590).
+     * Values 1,000–93,599 abbreviate to 'k' only when `abbreviate` is true
+     * (i.e. in full/fullreversed modes where space is tight).
      */
-    function formatAsTorn(tornAmount) {
+    function formatAsTorn(tornAmount, abbreviate = false) {
         if (tornAmount >= 1e12) {
             return '§' + (tornAmount / 1e12).toFixed(2).replace(/\.?0+$/, '') + 'T';
         }
@@ -156,8 +170,8 @@
         if (tornAmount >= 1e6) {
             return '§' + (tornAmount / 1e6).toFixed(2).replace(/\.?0+$/, '') + 'M';
         }
-        if (tornAmount >= 94000) {
-            return '§' + (tornAmount / 1e3).toFixed(1) + 'k';
+        if (abbreviate && tornAmount >= 93969) {
+            return '§' + (tornAmount / 1e3).toFixed(2).replace(/\.?0+$/, '') + 'k';
         }
         return '§' + tornAmount.toLocaleString();
     }
@@ -180,14 +194,17 @@
     }
 
     /**
-     * True if this element is a generic price div (not priceAndTotal).
+     * True if this node has a converted ancestor — meaning processElement already
+     * handled a parent element and stamped data-usd-converted="1" on it.
+     * The text walker must skip these or it will re-convert the already-formatted output.
      */
-    function isGenericPriceElement(el) {
-        return (
-            el.tagName === 'DIV' &&
-            el.className.includes('price') &&
-            !el.className.includes('priceAndTotal')
-        );
+    function isInsideConvertedElement(node) {
+        let el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+        while (el) {
+            if (el.dataset?.usdConverted === '1') return true;
+            el = el.parentElement;
+        }
+        return false;
     }
 
     /**
@@ -195,6 +212,25 @@
      */
     function isPriceAndTotalElement(el) {
         return el.tagName === 'DIV' && el.className.includes('priceAndTotal');
+    }
+
+    /**
+     * True if this is a generic price/sum/winner div (but NOT a priceAndTotal block).
+     */
+    function isGenericPriceElement(el) {
+    const cls = el.className || '';
+
+    return (
+        !cls.includes('priceAndTotal') &&
+        (
+            cls.includes('price') ||
+            cls.includes('sum') ||
+            cls.includes('winner') ||
+            cls.includes('classified') ||
+            cls.includes('reward') ||
+            cls.includes('link')
+        )
+    );
     }
 
     // ─────────────────────────────────────────────
@@ -209,57 +245,41 @@
      *     <span>$872,995</span>
      *     <span class="titleTotal">(13,456)</span>
      *   </div>
-     *
-     * Target output (fullreversed example):
-     *   <div class="priceAndTotal" data-usd-converted="1">
-     *     <span>§872,995<br>$0.19</span>
-     *     <span class="titleTotal">(13,456)</span>
-     *   </div>
-     *
-     * Key rules:
-     *   - We ONLY rewrite the text inside the price <span>.
-     *   - We insert a <br> between the converted price and the USD value.
-     *   - The totalSpan is never modified so Torn's own CSS keeps it visible.
      */
     function processPriceAndTotalBlock(containerEl) {
-        const priceSpan = containerEl.querySelector('priceAndTotal');
-        const totalSpan = containerEl.querySelector('span:titleTotal');
+        const priceSpan = containerEl.querySelector(
+            '[class*="priceAndTotal"] > span:not([class*="titleTotal"])'
+        );
+        const totalSpan = containerEl.querySelector(
+            '[class*="priceAndTotal"] > span[class*="titleTotal"]'
+        );
 
         if (!priceSpan) return;
 
         const parsed = parseSinglePriceElement(priceSpan.textContent);
         if (!parsed) return;
 
-        const [torn, usd] = parsed;
-        const originalPrice = priceSpan.textContent;
-        const total = totalSpan.textContent;
-        let stack = [];
+        const [torn, usd]    = parsed;
+        const originalPrice  = priceSpan.textContent;
+        const total          = totalSpan?.textContent ?? '';
+        let content;
 
         switch (DISPLAY_MODE) {
-            case 'converted':
-                stack = [`${usd} (${total})`];
-                break;
-            case 'combined':
-                stack = [`${usd} (${torn}) (${total})`];
-                break;
-            case 'reversed':
-                stack = [`${torn} (${usd}) (${total})`];
-                break;
-            case 'full':
-                stack = [`${usd} (${originalPrice}) (${total})`];
-                break;
-            case 'fullreversed':
-                stack = [`${originalPrice} (${usd}) (${total})`];
-                break;
-            case 'original':
-                stack = [`${torn} (${total})`];
-                break;
-            default:
-                stack = [`${originalPrice} (${usd}) (${total})`];
+            case 'converted':    content = `${usd} (${total})`;         break;
+            case 'combined':     content = `${usd} (${torn})`;          break;
+            case 'reversed':     content = `${torn} (${usd})`;          break;
+            case 'full':         content = `${usd} (${originalPrice})`; break;
+            case 'fullreversed': content = `${originalPrice} (${usd})`; break;
+            case 'original':     content = `${torn} (${total})`;        break;
+            default:             content = `${originalPrice} (${usd})`; break;
         }
 
-        // Rebuild ONLY the price span; totalSpan stays untouched.
-        priceSpan.innerHTML = stack.join('<br>');
+        priceSpan.innerHTML = content;
+
+        if (totalSpan) {
+            priceSpan.appendChild(document.createElement('br'));
+            priceSpan.appendChild(totalSpan);
+        }
 
         containerEl.dataset.usdConverted = '1';
     }
@@ -276,26 +296,13 @@
         let output;
 
         switch (DISPLAY_MODE) {
-            case 'converted':
-                output = usd;
-                break;
-            case 'combined':
-                output = `${usd} (${torn})`;
-                break;
-            case 'reversed':
-                output = `${torn} (${usd})`;
-                break;
-            case 'full':
-                output = `${usd} (${torn})`;
-                break;
-            case 'fullreversed':
-                output = `${torn} (${usd})`;
-                break;
-            case 'original':
-                output = torn;
-                break;
-            default:
-                output = `${torn} (${usd})`;
+            case 'converted':    output = usd;                break;
+            case 'combined':     output = `${usd} (${torn})`; break;
+            case 'reversed':     output = `${torn} (${usd})`; break;
+            case 'full':         output = `${usd} (${torn})`; break;
+            case 'fullreversed': output = `${torn} (${usd})`; break;
+            case 'original':     output = torn;               break;
+            default:             output = `${torn} (${usd})`; break;
         }
 
         el.innerHTML = output;
@@ -304,12 +311,12 @@
 
     /**
      * Route a price-related element to the right handler.
-     *
-     * IMPORTANT: check priceAndTotal FIRST — its class name also contains
-     * "price", so without this order the generic handler would grab it.
+     * IMPORTANT: check priceAndTotal FIRST — its class also contains "price",
+     * so the generic handler would incorrectly grab it otherwise.
      */
     function processElement(el) {
         if (!el || el.dataset.usdConverted === '1') return;
+        if (el.dataset.testid === 'price') return;          // handled by text walker; skip to avoid double-conversion
         if (el.textContent.includes('($') || el.textContent.includes('§')) return;
 
         if (isPriceAndTotalElement(el)) {
@@ -317,10 +324,9 @@
         } else if (isGenericPriceElement(el)) {
             processGenericPriceElement(el);
         } else {
-            // Fallback: element matched selector but isn't a price div.
-            // Treat its text content as a plain string conversion.
+            // Fallback: matched selector but not a handled element type.
             const text = el.textContent;
-            if (!text || !text.includes('$')) return;
+            if (!text || !text.includes('$'))           return;
             if (text.includes('(§') || text.includes('($')) return;
 
             el.textContent = convertPriceTextContent(text);
@@ -330,16 +336,12 @@
 
     /**
      * Convert any Torn price patterns found inside a raw text node.
-     * Skips nodes inside priceAndTotal blocks (those have their own handler)
-     * and nodes that already contain conversion markers.
+     * Skips nodes inside priceAndTotal blocks and already-converted nodes.
      */
     function processTextNode(node) {
-        if (
-            node.nodeType !== Node.TEXT_NODE ||
-            !node.nodeValue ||
-            isInsidePriceAndTotal(node.parentElement)
-        ) return;
-
+        if (node.nodeType !== Node.TEXT_NODE || !node.nodeValue) return;
+        if (isInsidePriceAndTotal(node.parentElement))           return;
+        if (isInsideConvertedElement(node))                      return;  // parent element already converted; don't re-process
         if (node.nodeValue.includes('(§') || node.nodeValue.includes('($')) return;
 
         node.nodeValue = convertPriceTextContent(node.nodeValue);
@@ -358,23 +360,19 @@
         if (rootNode.nodeType === Node.ELEMENT_NODE) {
             const priceNodes = rootNode.querySelectorAll?.(PRICE_ELEMENT_SELECTOR);
             if (priceNodes) {
-                for (const el of priceNodes) {
-                    processElement(el);
-                }
+                for (const el of priceNodes) processElement(el);
             }
         }
 
-        const textWalker = document.createTreeWalker(
+        const walker = document.createTreeWalker(
             rootNode,
             NodeFilter.SHOW_TEXT,
             null,
             false
         );
 
-        let currentNode;
-        while ((currentNode = textWalker.nextNode())) {
-            processTextNode(currentNode);
-        }
+        let node;
+        while ((node = walker.nextNode())) processTextNode(node);
     }
 
     // ─────────────────────────────────────────────
@@ -397,9 +395,6 @@
         }
     });
 
-    mutationObserver.observe(document.body, {
-        childList: true,
-        subtree: true,
-    });
+    mutationObserver.observe(document.body, { childList: true, subtree: true });
 
 })();
