@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn USD Converter
 // @author       shaul [3908280]
-// @version      2.3-approved
+// @version      2.4
 // @description  Convert Torn cash displays to USD equivalents
 // @match        https://www.torn.com/*
 // @grant        none
@@ -368,35 +368,34 @@
         // Skip nodes inside priceAndTotal blocks (they have own handler)
 
         if (node.nodeType !== Node.TEXT_NODE) {
-            log(`Skipped non-text node`);
             return;
         }
 
         if (!node.nodeValue) {
-            log(`Skipped empty node`);
             return;
         }
 
         if (isInsidePriceAndTotal(node.parentElement)) {
-            log(`Skipped node inside priceAndTotal`);
+            log(`Skipped node inside priceAndTotal: "${node.nodeValue}"`);
             return;
         }
 
         if (node.nodeValue.includes('(§') || node.nodeValue.includes('($')) {
-            log(`Skipped already converted node`);
+            log(`Skipped already converted node: "${node.nodeValue}"`);
             return;
         }
 
         if (!node.nodeValue.includes('$')) {
-            log(`Skipped node with no price`);
             return;
         }
+
+        log(`Found text node with $: "${node.nodeValue}"`, null, node.parentElement);
 
         const originalValue = node.nodeValue;
         node.nodeValue = convertPriceTextContent(node.nodeValue);
 
         if (originalValue !== node.nodeValue) {
-            log(`Text node conversion: "${originalValue}"`, null, node.parentElement);
+            log(`Text node conversion: "${originalValue}" → "${node.nodeValue}"`, null, node.parentElement);
         }
     }
 
@@ -422,12 +421,9 @@
         const textWalker = document.createTreeWalker(rootNode, NodeFilter.SHOW_TEXT, null, false);
 
         let currentNode;
-        let textNodeCount = 0;
         while ((currentNode = textWalker.nextNode())) {
-            textNodeCount++;
             processTextNode(currentNode);
         }
-        log(`Walked ${textNodeCount} text nodes`);
     }
 
     // ─────────────────────────────────────────────
