@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn USD Converter
 // @author       shaul [3908280]
-// @version      2.2
+// @version      2.3
 // @description  Convert Torn cash displays to USD equivalents
 // @match        https://www.torn.com/*
 // @grant        none
@@ -351,11 +351,30 @@
         // Convert Torn price patterns in raw text nodes
         // Skip nodes inside priceAndTotal blocks (they have own handler)
 
-        if (node.nodeType !== Node.TEXT_NODE || !node.nodeValue || isInsidePriceAndTotal(node.parentElement)) {
+        if (node.nodeType !== Node.TEXT_NODE) {
+            log(`Skipped non-text node`);
             return;
         }
 
-        if (node.nodeValue.includes('(§') || node.nodeValue.includes('($')) return;
+        if (!node.nodeValue) {
+            log(`Skipped empty node`);
+            return;
+        }
+
+        if (isInsidePriceAndTotal(node.parentElement)) {
+            log(`Skipped node inside priceAndTotal`);
+            return;
+        }
+
+        if (node.nodeValue.includes('(§') || node.nodeValue.includes('($')) {
+            log(`Skipped already converted node`);
+            return;
+        }
+
+        if (!node.nodeValue.includes('$')) {
+            log(`Skipped node with no price`);
+            return;
+        }
 
         const originalValue = node.nodeValue;
         node.nodeValue = convertPriceTextContent(node.nodeValue);
@@ -392,7 +411,7 @@
             textNodeCount++;
             processTextNode(currentNode);
         }
-        log(`Walked ${textNodeCount} text nodes`, null);
+        log(`Walked ${textNodeCount} text nodes`);
     }
 
     // ─────────────────────────────────────────────
