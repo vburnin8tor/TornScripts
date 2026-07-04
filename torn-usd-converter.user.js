@@ -111,6 +111,7 @@
 
     function convertPriceTextContent(text) {
         // Replace all Torn price patterns in text with formatted conversions
+        // Add space after closing parenthesis to separate from following elements
 
         return text.replace(TORN_PRICE_REGEX, (fullMatch, numericPart, suffix) => {
             const tornAmount = parseTornAmount(numericPart, suffix);
@@ -120,24 +121,39 @@
             const tornFormatted = formatAsTorn(tornAmount);
             const usdFormatted = formatAsUSD(tornAmount);
 
+            let result;
             switch (DISPLAY_MODE) {
                 case 'converted':
-                    return usdFormatted;
+                    result = usdFormatted;
+                    break;
                 case 'combined':
-                    return `${usdFormatted} (${tornFormatted})`;
+                    result = `${usdFormatted} (${tornFormatted})`;
+                    break;
                 case 'reversed':
-                    return `${tornFormatted} (${usdFormatted})`;
+                    result = `${tornFormatted} (${usdFormatted})`;
+                    break;
                 case 'full':
-                    return `${usdFormatted} (${originalWithTornSymbol})`;
+                    result = `${usdFormatted} (${originalWithTornSymbol})`;
+                    break;
                 case 'fullreversed':
-                    return `${originalWithTornSymbol} (${usdFormatted})`;
+                    result = `${originalWithTornSymbol} (${usdFormatted})`;
+                    break;
                 case 'reduced':
-                    return `${tornFormatted} (<${usdFormatted === '$0' ? '$0.01' : usdFormatted}>)`;
+                    result = `${tornFormatted} (<${usdFormatted === '$0' ? '$0.01' : usdFormatted}>)`;
+                    break;
                 case 'original':
-                    return originalWithTornSymbol;
+                    result = originalWithTornSymbol;
+                    break;
                 default:
-                    return fullMatch;
+                    result = fullMatch;
             }
+
+            // Add space after closing paren if followed by bracket or other non-whitespace
+            if (result.endsWith(')') && fullMatch !== result) {
+                result += ' ';
+            }
+
+            return result;
         });
     }
 
