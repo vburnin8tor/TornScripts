@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn USD Converter
 // @author       shaul [3908280]
-// @version      2.0
+// @version      2.1
 // @description  Convert Torn cash displays to USD equivalents
 // @match        https://www.torn.com/*
 // @grant        none
@@ -53,9 +53,11 @@
     // UTILITIES
     // ─────────────────────────────────────────────
 
-    function log(message, data) {
+    function log(message, data, element) {
         if (!DEBUG) return;
-        if (data !== undefined) {
+        if (element) {
+            console.log(`[TornUSD] ${message}`, data, element);
+        } else if (data !== undefined) {
             console.log(`[TornUSD] ${message}`, data);
         } else {
             console.log(`[TornUSD] ${message}`);
@@ -117,8 +119,6 @@
             const originalWithTornSymbol = fullMatch.replace('$', '§');
             const tornFormatted = formatAsTorn(tornAmount);
             const usdFormatted = formatAsUSD(tornAmount);
-
-            log(`Converting: ${fullMatch} → Torn: ${tornFormatted}, USD: ${usdFormatted}`);
 
             switch (DISPLAY_MODE) {
                 case 'converted':
@@ -244,8 +244,6 @@
         const total = totalSpan?.textContent || '';
         let output;
 
-        log(`Processing priceAndTotal: ${originalPrice}`, { torn, usd, total });
-
         switch (DISPLAY_MODE) {
             case 'converted':
                 output = `${usd} (${total})`;
@@ -279,6 +277,8 @@
             priceSpan.appendChild(totalSpan);
         }
 
+        log(`Converting priceAndTotal: ${originalPrice}`, { torn, usd }, containerEl);
+
         containerEl.dataset.usdConverted = '1';
     }
 
@@ -289,9 +289,8 @@
         if (!parsed) return;
 
         const [torn, usd] = parsed;
+        const originalText = el.textContent;
         let output;
-
-        log(`Processing generic price: ${el.textContent}`, { torn, usd });
 
         switch (DISPLAY_MODE) {
             case 'converted':
@@ -320,6 +319,9 @@
         }
 
         el.innerHTML = output;
+
+        log(`Converting generic price: ${originalText}`, { torn, usd }, el);
+
         el.dataset.usdConverted = '1';
     }
 
