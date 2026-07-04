@@ -367,11 +367,9 @@
 
         if (!rootNode) return;
 
-        log(`Scanning subtree`, rootNode);
-
         if (rootNode.nodeType === Node.ELEMENT_NODE) {
             const priceNodes = rootNode.querySelectorAll?.(PRICE_ELEMENT_SELECTOR);
-            if (priceNodes) {
+            if (priceNodes && priceNodes.length > 0) {
                 log(`Found ${priceNodes.length} price elements`);
                 for (const el of priceNodes) {
                     processElement(el);
@@ -398,8 +396,6 @@
 
     // Watch for dynamically added content
     const mutationObserver = new MutationObserver((mutations) => {
-        log(`Mutation detected, rescanning...`);
-
         for (const mutation of mutations) {
             for (const addedNode of mutation.addedNodes) {
                 if (addedNode.nodeType === Node.TEXT_NODE) {
