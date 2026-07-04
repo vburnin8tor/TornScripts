@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn USD Converter
 // @author       shaul [3908280]
-// @version      2.1
+// @version      2.2
 // @description  Convert Torn cash displays to USD equivalents
 // @match        https://www.torn.com/*
 // @grant        none
@@ -47,7 +47,7 @@
 
     // CSS selector for price-related elements
     const PRICE_ELEMENT_SELECTOR =
-        'span[class*="displayPrice"], span[class*="price"], div[class*="price"], div[class*="priceAndTotal"], span[class*="winner"], span[class*=sum], span[class*=grandTotal]';
+        'span[class*="displayPrice"], span[class*="price"], div[class*="price"], div[class*="priceAndTotal"], span[class*=sum], span[class*=grandTotal]';
 
     // ─────────────────────────────────────────────
     // UTILITIES
@@ -208,7 +208,7 @@
 
         const cls = el.className || '';
         const isPrice = cls.includes('price') && !cls.includes('priceAndTotal');
-        const isOtherTarget = cls.includes('sum') || cls.includes('winner') || cls.includes('grandTotal');
+        const isOtherTarget = cls.includes('sum') || cls.includes('grandTotal');
 
         return isPrice || isOtherTarget;
     }
@@ -357,7 +357,12 @@
 
         if (node.nodeValue.includes('(§') || node.nodeValue.includes('($')) return;
 
+        const originalValue = node.nodeValue;
         node.nodeValue = convertPriceTextContent(node.nodeValue);
+
+        if (originalValue !== node.nodeValue) {
+            log(`Text node conversion: "${originalValue}"`, null, node.parentElement);
+        }
     }
 
     // ─────────────────────────────────────────────
@@ -382,9 +387,12 @@
         const textWalker = document.createTreeWalker(rootNode, NodeFilter.SHOW_TEXT, null, false);
 
         let currentNode;
+        let textNodeCount = 0;
         while ((currentNode = textWalker.nextNode())) {
+            textNodeCount++;
             processTextNode(currentNode);
         }
+        log(`Walked ${textNodeCount} text nodes`, null);
     }
 
     // ─────────────────────────────────────────────
