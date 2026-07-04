@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn USD Converter
 // @author       shaul [3908280]
-// @version      2.4
+// @version      2.5
 // @description  Convert Torn cash displays to USD equivalents
 // @match        https://www.torn.com/*
 // @grant        none
@@ -399,6 +399,69 @@
         }
     }
 
+    function processElementsWithPrice(rootNode) {
+        // Find all elements containing $ and process their text content
+        // This handles mixed content (text nodes + HTML) by processing at element level
+
+        if (!rootNode || rootNode.nodeType !== Node.ELEMENT_NODE) return;
+
+        const walker = document.createTreeWalker(
+            rootNode,
+            NodeFilter.SHOW_ELEMENT,
+            null,
+            false
+        );
+
+        let currentEl;
+        while ((currentEl = walker.nextNode())) {
+            // Skip if already processed
+            if (currentEl.dataset.usdConverted === '1') continue;
+            
+            // Skip if already converted
+            if (currentEl.textContent.includes('($') || currentEl.textContent.includes('§')) continue;
+            
+            // Skip large containers to avoid processing entire page
+            if (currentEl.children.length > 50) continue;
+
+            const text = currentEl.textContent;
+            if (!text || !text.includes('$')) continue;
+
+            // Check if this element (not a parent) contains the price
+            // by verifying it has no direct child elements that would contain it
+            const hasDirectChildWithPrice = Array.from(currentEl.children).some(
+                child => child.textContent.includes('$') && !child.textContent.includes('($') && !child.textContent.includes('§')
+            );
+
+            if (hasDirectChildWithPrice) continue;
+
+            log(`Found element with $: "${text.substring(0, 80)}..."`, null, currentEl);
+
+            // Replace text in all text nodes within this element
+            const textWalker = document.createTreeWalker(
+                currentEl,
+                NodeFilter.SHOW_TEXT,
+                null,
+                false
+            );
+
+            let textNode;
+            let hasConversion = false;
+            while ((textNode = textWalker.nextNode())) {
+                if (textNode.nodeValue && textNode.nodeValue.includes('$')) {
+                    const original = textNode.nodeValue;
+                    textNode.nodeValue = convertPriceTextContent(textNode.nodeValue);
+                    if (original !== textNode.nodeValue) {
+                        hasConversion = true;
+                    }
+                }
+            }
+
+            if (hasConversion) {
+                currentEl.dataset.usdConverted = '1';
+            }
+        }
+    }
+
     // ─────────────────────────────────────────────
     // SCANNING
     // ─────────────────────────────────────────────
@@ -424,6 +487,9 @@
         while ((currentNode = textWalker.nextNode())) {
             processTextNode(currentNode);
         }
+
+        // Also process elements with mixed content (text + HTML)
+        processElementsWithPrice(rootNode);
     }
 
     // ─────────────────────────────────────────────
